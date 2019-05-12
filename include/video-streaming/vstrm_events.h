@@ -24,14 +24,51 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _VSTRM_RTCP_APP_H_
-#define _VSTRM_RTCP_APP_H_
+#ifndef _VSTRM_EVENTS_H_
+#define _VSTRM_EVENTS_H_
 
 
-#define VSTRM_RTCP_APP_PACKET_NAME 0x41525354
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_CLOCK_DELTA 1
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_VIDEO_STATS 2
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT 3
+/* Event type
+ * Note: for sender/receiver compatibility reasons, values can only be added
+ * here, not removed; values should be explicit; VSTRM_EVENT_MAX must be less
+ * than or equal to UINT8_MAX (events are serialized as 8bit integers) */
+enum vstrm_event {
+	/* No event (should never be sent) */
+	VSTRM_EVENT_NONE = 0,
+
+	/* Pipeline reconfiguration (e.g. when changing the video recording
+	 * framerate or switching between photo and video recording modes) */
+	VSTRM_EVENT_RECONFIGURE = 1,
+
+	/* Resolution change, which is not a whole pipeline reconfiguration
+	 * (e.g. when spatial scalability changes the stream resolution) */
+	VSTRM_EVENT_RESOLUTION_CHANGE = 2,
+
+	/* A photo is being taken (to be sent as close as possible to the real
+	 * shutter trigger) */
+	VSTRM_EVENT_PHOTO_TRIGGER = 3,
+
+	/* Element count */
+	VSTRM_EVENT_MAX,
+};
 
 
-#endif /* !_VSTRM_RTCP_APP_H_ */
+/**
+ * Get an enum vstrm_event value from a string.
+ * Valid strings are only the suffix of the event name (eg. 'RECONFIGURE').
+ * The case is ignored.
+ * @param str: event value to convert
+ * @return the enum vstrm_event value or VSTRM_EVENT_NONE if unknown
+ */
+VSTRM_API enum vstrm_event vstrm_event_from_str(const char *str);
+
+
+/**
+ * Get a string from an enum vstrm_event value.
+ * @param event: event value to convert
+ * @return a string description of the event
+ */
+VSTRM_API const char *vstrm_event_to_str(enum vstrm_event event);
+
+
+#endif /* !_VSTRM_EVENTS_H_ */

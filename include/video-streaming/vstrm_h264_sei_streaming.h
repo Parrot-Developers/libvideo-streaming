@@ -68,11 +68,34 @@ struct vstrm_h264_sei_streaming_v2 {
 };
 
 
+/* "Parrot Streaming" v4 user data SEI UUID
+ * Note: v4 is for Gen4 streaming; there is no v3
+ * UUID: ffdd48e7-f124-4b15-b266-3e212c5d3a3d */
+#define VSTRM_H264_SEI_STREAMING_V4_UUID_0 0xffdd48e7
+#define VSTRM_H264_SEI_STREAMING_V4_UUID_1 0xf1244b15
+#define VSTRM_H264_SEI_STREAMING_V4_UUID_2 0xb2663e21
+#define VSTRM_H264_SEI_STREAMING_V4_UUID_3 0x2c5d3a3d
+
+
+/* "Parrot Streaming" v4 parameters */
+struct vstrm_h264_sei_streaming_v4 {
+	/* Number of macroblocks per slice (the last slice
+	 * of the frame may be smaller) */
+	uint16_t slice_mb_count;
+
+	/* Number of macroblocks per slice for the first frame of intra-refresh
+	 * pattern, i.e. on the recovery point (the last slice of the frame may
+	 * be smaller); if null, there is no difference between recovery point
+	 * frames and other frames */
+	uint16_t slice_mb_count_recovery_point;
+};
+
+
 /**
  * Test if the input UUID is the one of "Parrot Streaming" v1 user data SEI.
  * @param uuid: user data SEI UUID
  * @return 1 if the UUID is the one of "Parrot Streaming" v1 user data SEI
- *         or 0 otherwise, negative errno value in case of error
+ *         or 0 otherwise
  */
 VSTRM_API
 int vstrm_h264_sei_streaming_is_v1(const uint8_t uuid[16]);
@@ -139,7 +162,7 @@ int vstrm_h264_sei_streaming_v1_read(struct vstrm_h264_sei_streaming_v1 *sei,
  * Test if the input UUID is the one of "Parrot Streaming" v2 user data SEI.
  * @param uuid: user data SEI UUID
  * @return 1 if the UUID is the one of "Parrot Streaming" v2 user data SEI
- *         or 0 otherwise, negative errno value in case of error
+ *         or 0 otherwise
  */
 VSTRM_API
 int vstrm_h264_sei_streaming_is_v2(const uint8_t uuid[16]);
@@ -201,5 +224,80 @@ int vstrm_h264_sei_streaming_v2_read(struct vstrm_h264_sei_streaming_v2 *sei,
 				     const uint8_t *buf,
 				     size_t len);
 
+
+/**
+ * Test if the input UUID is the one of "Parrot Streaming" v4 user data SEI.
+ * @param uuid: user data SEI UUID
+ * @return 1 if the UUID is the one of "Parrot Streaming" v4 user data SEI
+ *         or 0 otherwise
+ */
+VSTRM_API
+int vstrm_h264_sei_streaming_is_v4(const uint8_t uuid[16]);
+
+
+/**
+ * Get the required size in bytes for serializing a "Parrot Streaming" v4
+ * user data SEI (excluding the UUID).
+ * The SEI structure must have been previously filled.
+ * @param sei: pointer to a "Parrot Streaming" v4 user data SEI structure
+ * @return the size in bytes of a "Parrot Streaming" v4 user data SEI,
+ *         negative errno value in case of error
+ */
+VSTRM_API
+ssize_t vstrm_h264_sei_streaming_v4_get_size(
+	const struct vstrm_h264_sei_streaming_v4 *sei);
+
+
+/**
+ * Write "Parrot Streaming" v4 user data SEI.
+ * This function writes the "Parrot Streaming" v4 UUID in the uuid array and
+ * fills the supplied buffer with the "Parrot Streaming" v4 user data SEI
+ * (without the UUID). The size of the data written is returned through the
+ * len parameter.
+ * The buffer must have been previously allocated and its size must be
+ * supplied through the len parameter. The ownership of the buffer stays with
+ * the caller.
+ * @param sei: pointer to a "Parrot Streaming" v4 user data SEI structure
+ * @param uuid: pointer to the UUID array (output)
+ * @param buf: pointer to the buffer to write to (output)
+ * @param len: pointer to the buffer length (input/output)
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_h264_sei_streaming_v4_write(
+	const struct vstrm_h264_sei_streaming_v4 *sei,
+	uint8_t uuid[16],
+	uint8_t *buf,
+	size_t *len);
+
+
+/**
+ * Read "Parrot Streaming" v4 user data SEI.
+ * This function checks the UUID value and fills the supplied structure with
+ * the deserialized "Parrot Streaming" v4 user data SEI.
+ * The size of the buffer (len parameter) must be sufficient to allow reading
+ * the data, otherwise an error is returned. The ownership of the buffer stays
+ * with the caller.
+ * @param sei: pointer to a "Parrot Streaming" v4 user data SEI
+ *             structure (output)
+ * @param uuid: pointer to the UUID array
+ * @param buf: pointer to the buffer to read from
+ * @param len: buffer length
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_h264_sei_streaming_v4_read(struct vstrm_h264_sei_streaming_v4 *sei,
+				     const uint8_t uuid[16],
+				     const uint8_t *buf,
+				     size_t len);
+
+
+/**
+ * Test if the input UUID is the one of "Parrot Streaming" user data SEI.
+ * @param uuid: user data SEI UUID
+ * @return 1 if the UUID is the one of "Parrot Streaming" user data SEI
+ *         or 0 otherwise
+ */
+VSTRM_API int vstrm_h264_is_sei_streaming(const uint8_t uuid[16]);
 
 #endif /* !_VSTRM_H264_SEI_STREAMING_H_ */

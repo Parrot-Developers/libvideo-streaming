@@ -27,6 +27,8 @@
 #ifndef _VSTRM_FRAME_H_
 #define _VSTRM_FRAME_H_
 
+#include <stdbool.h>
+
 
 /* Forward declaration */
 struct vstrm_frame;
@@ -179,6 +181,10 @@ struct vstrm_frame_info {
 
 	/* H.264 frame macroblock status (see vstrm_frame_mb_status) */
 	uint8_t *mb_status;
+
+	/* Whether the frame contains a slice for which there is a long-term
+	 * reference picture list modification */
+	bool uses_ltr;
 };
 /* clang-format on */
 
@@ -233,8 +239,8 @@ struct vstrm_frame {
 	/* Maximum number of allocated NAL units */
 	uint32_t max_nalu_count;
 
-	/* Metadata of the frame */
-	struct vmeta_frame metadata;
+	/* Metadata of the frame (NULL if no metadata present) */
+	struct vmeta_frame *metadata;
 
 	/* More information about the frame (receiver only) */
 	struct vstrm_frame_info info;

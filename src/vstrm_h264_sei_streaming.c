@@ -75,7 +75,8 @@ static int check_uuid(const uint8_t uuid[16],
 
 int vstrm_h264_sei_streaming_is_v1(const uint8_t uuid[16])
 {
-	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_VAL_IF(uuid == NULL, EINVAL, 0);
+
 	return check_uuid(uuid,
 			  VSTRM_H264_SEI_STREAMING_V1_UUID_0,
 			  VSTRM_H264_SEI_STREAMING_V1_UUID_1,
@@ -113,7 +114,7 @@ int vstrm_h264_sei_streaming_v1_write(
 	size_t sz = res;
 
 	if (*len < sz)
-		return -EAGAIN;
+		return -ENOBUFS;
 
 	encode_uuid(uuid,
 		    VSTRM_H264_SEI_STREAMING_V1_UUID_0,
@@ -170,7 +171,7 @@ int vstrm_h264_sei_streaming_v1_read(struct vstrm_h264_sei_streaming_v1 *sei,
 
 int vstrm_h264_sei_streaming_is_v2(const uint8_t uuid[16])
 {
-	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_VAL_IF(uuid == NULL, EINVAL, 0);
 
 	return check_uuid(uuid,
 			  VSTRM_H264_SEI_STREAMING_V2_UUID_0,
@@ -207,7 +208,7 @@ int vstrm_h264_sei_streaming_v2_write(
 	size_t sz = res;
 
 	if (*len < sz)
-		return -EAGAIN;
+		return -ENOBUFS;
 
 	encode_uuid(uuid,
 		    VSTRM_H264_SEI_STREAMING_V2_UUID_0,
@@ -243,4 +244,92 @@ int vstrm_h264_sei_streaming_v2_read(struct vstrm_h264_sei_streaming_v2 *sei,
 	sei->slice_mb_count = (buf[2] << 8) | buf[3];
 
 	return 0;
+}
+
+
+int vstrm_h264_sei_streaming_is_v4(const uint8_t uuid[16])
+{
+	ULOG_ERRNO_RETURN_VAL_IF(uuid == NULL, EINVAL, 0);
+
+	return check_uuid(uuid,
+			  VSTRM_H264_SEI_STREAMING_V4_UUID_0,
+			  VSTRM_H264_SEI_STREAMING_V4_UUID_1,
+			  VSTRM_H264_SEI_STREAMING_V4_UUID_2,
+			  VSTRM_H264_SEI_STREAMING_V4_UUID_3);
+}
+
+
+ssize_t vstrm_h264_sei_streaming_v4_get_size(
+	const struct vstrm_h264_sei_streaming_v4 *sei)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(sei == NULL, EINVAL);
+	return 4;
+}
+
+
+int vstrm_h264_sei_streaming_v4_write(
+	const struct vstrm_h264_sei_streaming_v4 *sei,
+	uint8_t uuid[16],
+	uint8_t *buf,
+	size_t *len)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(sei == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(len == NULL, EINVAL);
+
+	ssize_t res = vstrm_h264_sei_streaming_v4_get_size(sei);
+	if (res < 0) {
+		ULOG_ERRNO("vstrm_h264_sei_streaming_v4_get_size", (int)-res);
+		return res;
+	}
+	size_t sz = res;
+
+	if (*len < sz)
+		return -ENOBUFS;
+
+	encode_uuid(uuid,
+		    VSTRM_H264_SEI_STREAMING_V4_UUID_0,
+		    VSTRM_H264_SEI_STREAMING_V4_UUID_1,
+		    VSTRM_H264_SEI_STREAMING_V4_UUID_2,
+		    VSTRM_H264_SEI_STREAMING_V4_UUID_3);
+
+	buf[0] = (sei->slice_mb_count >> 8) & 0xff;
+	buf[1] = sei->slice_mb_count & 0xff;
+	buf[2] = (sei->slice_mb_count_recovery_point >> 8) & 0xff;
+	buf[3] = sei->slice_mb_count_recovery_point & 0xff;
+
+	*len = sz;
+	return 0;
+}
+
+
+int vstrm_h264_sei_streaming_v4_read(struct vstrm_h264_sei_streaming_v4 *sei,
+				     const uint8_t uuid[16],
+				     const uint8_t *buf,
+				     size_t len)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(sei == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
+
+	if (!vstrm_h264_sei_streaming_is_v4(uuid))
+		return -EIO;
+
+	if (len < 4)
+		return -EIO;
+	sei->slice_mb_count = (buf[0] << 8) | buf[1];
+	sei->slice_mb_count_recovery_point = (buf[2] << 8) | buf[3];
+
+	return 0;
+}
+
+
+int vstrm_h264_is_sei_streaming(const uint8_t uuid[16])
+{
+	ULOG_ERRNO_RETURN_VAL_IF(uuid == NULL, EINVAL, 0);
+
+	return (vstrm_h264_sei_streaming_is_v1(uuid)) ||
+	       (vstrm_h264_sei_streaming_is_v2(uuid)) ||
+	       (vstrm_h264_sei_streaming_is_v4(uuid));
 }

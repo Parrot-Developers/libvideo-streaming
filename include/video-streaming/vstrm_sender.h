@@ -92,25 +92,25 @@ struct vstrm_sender_cfg {
 /* Sender callback functions */
 struct vstrm_sender_cbs {
 	/* Called when a data (RTP) packet needs to be sent.
-	 * The sender has a reference on the buffer and it must not be
+	 * The sender has a reference on the packet and it must not be
 	 * unreferenced by the callback function.
 	 * @param stream: sender instance pointer
-	 * @param buf: pointer to the buffer to send
+	 * @param pkt: pointer to the packet to send
 	 * @param userdata: user data pointer
 	 * @return 0 on success, negative errno value in case of error */
 	int (*send_data)(struct vstrm_sender *stream,
-			 struct pomp_buffer *buf,
+			 struct tpkt_packet *pkt,
 			 void *userdata);
 
 	/* Called when a control (RTCP) packet needs to be sent.
-	 * The sender has a reference on the buffer and it does not need to be
+	 * The sender has a reference on the packet and it does not need to be
 	 * unreferenced by the callback function.
 	 * @param stream: sender instance pointer
-	 * @param buf: pointer to the buffer to send
+	 * @param pkt: pointer to the packet to send
 	 * @param userdata: user data pointer
 	 * @return 0 on success, negative errno value in case of error */
 	int (*send_ctrl)(struct vstrm_sender *stream,
-			 struct pomp_buffer *buf,
+			 struct tpkt_packet *pkt,
 			 void *userdata);
 
 	/* Called to enable/disable the output availability monitoring (ready
@@ -134,9 +134,12 @@ struct vstrm_sender_cbs {
 	/* Called when a RTCP receiver report been received from the receiver.
 	 * @param stream: sender instance pointer
 	 * @param rr: pointer to the received receiver report structure
+	 * @param rtd: round-trip delay in microseconds if known,
+	 *             or UINT32_MAX otherwise
 	 * @param userdata: user data pointer */
 	void (*receiver_report)(struct vstrm_sender *stream,
 				const struct rtcp_pkt_receiver_report *rr,
+				uint32_t rtd,
 				void *userdata);
 
 	/* Called when video statistics have been received from the receiver.
@@ -240,6 +243,16 @@ int vstrm_sender_send_rtp_pkt(struct vstrm_sender *self, struct rtp_pkt *pkt);
 
 
 /**
+ * Send an event through RTCP.
+ * @param self: sender instance handle
+ * @param event: event value to send
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_sender_send_event(struct vstrm_sender *self, enum vstrm_event event);
+
+
+/**
  * Send a RTCP goodbye packet.
  * An optional reason string can be supplied. The reason string ownership stays
  * with the caller, it is copied internally if necessary.
@@ -253,16 +266,13 @@ int vstrm_sender_send_goodbye(struct vstrm_sender *self, const char *reason);
 
 /**
  * Receive a control (RTCP) packet.
- * The ownership of the buffer stays with the caller.
+ * The ownership of the packet stays with the caller.
  * @param self: sender instance handle
- * @param buf: pointer to the received buffer
- * @param ts: packet reception timestamp
+ * @param pkt: pointer to the received packet
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_recv_ctrl(struct vstrm_sender *self,
-			   struct pomp_buffer *buf,
-			   const struct timespec *ts);
+int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt);
 
 
 /**

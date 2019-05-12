@@ -31,6 +31,7 @@
 
 #include <futils/list.h>
 #include <libpomp.h>
+#include <transport-packet/tpkt.h>
 #include <video-metadata/vmeta.h>
 
 #ifdef __cplusplus
@@ -54,6 +55,7 @@ struct rtp_pkt;
 struct rtcp_pkt_receiver_report;
 
 
+#include "video-streaming/vstrm_events.h"
 #include "video-streaming/vstrm_h264_sei_streaming.h"
 #include "video-streaming/vstrm_video_stats.h"
 

@@ -113,10 +113,6 @@ int vstrm_rtp_h264_rx_set_codec_info(struct vstrm_rtp_h264_rx *self,
 				     const struct vstrm_codec_info *info);
 
 
-int vstrm_rtp_h264_rx_generate_grey_i_frame(struct vstrm_rtp_h264_rx *self,
-					    struct vstrm_frame **ret_frame);
-
-
 int vstrm_rtp_h264_tx_new(const struct vstrm_rtp_h264_tx_cfg *cfg,
 			  struct vstrm_rtp_h264_tx **ret_obj);
 
@@ -132,6 +128,40 @@ int vstrm_rtp_h264_tx_process_frame(struct vstrm_rtp_h264_tx *self,
 int vstrm_rtp_h264_tx_set_cfg_dyn(
 	struct vstrm_rtp_h264_tx *self,
 	const struct vstrm_rtp_h264_tx_cfg_dyn *cfg_dyn);
+
+
+/**
+ * Protobuf-based metadata header packing/unpacking
+ *
+ * Format is:
+ * | 15..9 (7bits)        | 8..2 (7 bits)           | 1..0 (2bits)  |
+ * | index of last packet | index of current packet | padding bytes |
+ *
+ * Transmitted in network endian.
+ */
+
+static inline uint16_t vstrm_rtp_h264_meta_header_pack(uint8_t last_pack,
+						       uint8_t current_pack,
+						       uint8_t padding)
+{
+	uint16_t packed = ((last_pack & 0x3f) << 9) |
+			  ((current_pack & 0x3f) << 2) | (padding & 0x3);
+	return htons(packed);
+}
+
+static inline int vstrm_rtp_h264_meta_header_unpack(uint16_t packed,
+						    uint8_t *last_pack,
+						    uint8_t *current_pack,
+						    uint8_t *padding)
+{
+	if (!last_pack || !current_pack || !padding)
+		return -EINVAL;
+	packed = ntohs(packed);
+	*last_pack = ((packed >> 9) & 0x3f);
+	*current_pack = (packed >> 2) & 0x3f;
+	*padding = packed & 0x3;
+	return 0;
+}
 
 
 #endif /* !_VSTRM_RTP_H264_H_ */

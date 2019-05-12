@@ -50,10 +50,6 @@ struct vstrm_receiver;
  * the decoding (for intra-refresh streams) */
 #define VSTRM_RECEIVER_FLAGS_H264_GEN_GREY_IDR_FRAME (1 << 5)
 
-/* Fake H.264 frame_num syntax elements in slice headers to force contiguous
- * frame numbers at the decoder input */
-#define VSTRM_RECEIVER_FLAGS_H264_FAKE_FRAME_NUM (1 << 6)
-
 /* Compute full macroblock status by parsing all macroblocks instead of just
  * looking at the slice type (to detect refresh patterns in P-slices).
  * This can generate high CPU load so it should be used mainly for tests.
@@ -63,7 +59,7 @@ struct vstrm_receiver;
 
 /* Receiver configuration */
 struct vstrm_receiver_cfg {
-	/* Event loop to use */
+	/* Event loop to use (optional, can be NULL) */
 	struct pomp_loop *loop;
 
 	/* Configuration flags, see VSTRM_RECEIVER_FLAGS_xxx */
@@ -85,14 +81,14 @@ struct vstrm_receiver_cfg {
 /* Receiver callback functions */
 struct vstrm_receiver_cbs {
 	/* Called when a control (RCTP) packet needs to be sent.
-	 * The receiver has a reference on the buffer and it must not be
+	 * The receiver has a reference on the packet and it must not be
 	 * unreferenced by the callback function.
 	 * @param stream: receiver instance pointer
-	 * @param buf: pointer to the buffer to send
+	 * @param pkt: pointer to the packet to send
 	 * @param userdata: user data pointer
 	 * @return 0 on success, negative errno value in case of error */
 	int (*send_ctrl)(struct vstrm_receiver *stream,
-			 struct pomp_buffer *buf,
+			 struct tpkt_packet *pkt,
 			 void *userdata);
 
 	/* Called when the codec information has changed.
@@ -135,6 +131,14 @@ struct vstrm_receiver_cbs {
 	void (*session_metadata_peer_changed)(struct vstrm_receiver *stream,
 					      const struct vmeta_session *meta,
 					      void *userdata);
+
+	/* Called when an event is received through RTCP from the sender.
+	 * @param stream: receiver instance pointer
+	 * @param event: the received event
+	 * @param userdata: user data pointer */
+	void (*event)(struct vstrm_receiver *stream,
+		      enum vstrm_event event,
+		      void *userdata);
 
 	/* Called when a RTCP goodbye packet has been received from
 	 * the sender.
@@ -192,30 +196,26 @@ int vstrm_receiver_destroy(struct vstrm_receiver *self);
 
 /**
  * Receive a data (RTP) packet.
- * The ownership of the buffer stays within the caller.
+ * The ownership of the packet stays within the caller.
  * @param self: receiver instance handle
- * @param buf: pointer to the received buffer
- * @param ts: packet reception timestamp
+ * @param pkt: pointer to the received packet
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
 int vstrm_receiver_recv_data(struct vstrm_receiver *self,
-			     struct pomp_buffer *buf,
-			     const struct timespec *ts);
+			     struct tpkt_packet *pkt);
 
 
 /**
  * Receive a control (RTCP) packet.
- * The ownership of the buffer stays within the caller.
+ * The ownership of the packet stays within the caller.
  * @param self: receiver instance handle
- * @param buf: pointer to the received buffer
- * @param ts: packet reception timestamp
+ * @param pkt: pointer to the received packet
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
 int vstrm_receiver_recv_ctrl(struct vstrm_receiver *self,
-			     struct pomp_buffer *buf,
-			     const struct timespec *ts);
+			     struct tpkt_packet *pkt);
 
 
 /**
@@ -243,19 +243,6 @@ VSTRM_API
 int vstrm_receiver_set_codec_info(struct vstrm_receiver *self,
 				  const struct vstrm_codec_info *info,
 				  uint32_t ssrc);
-
-
-/**
- * Generate a H.264 grey IDR frame.
- * Used to generate a H.264 grey IDR frame to synchronize a video decoder
- * (for intra-refresh streams).
- * @param self: receiver instance handle
- * @param ret_frame: pointer to a frame (output)
- * @return 0 on success, negative errno value in case of error
- */
-VSTRM_API
-int vstrm_receiver_generate_grey_i_frame(struct vstrm_receiver *self,
-					 struct vstrm_frame **ret_frame);
 
 
 /**

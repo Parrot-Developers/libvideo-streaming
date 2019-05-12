@@ -27,8 +27,11 @@
 #ifndef _VSTRM_PRIV_H_
 #define _VSTRM_PRIV_H_
 
+#define _GNU_SOURCE
+#include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,10 +48,7 @@
 #define ULOG_TAG vstrm
 #include <ulog.h>
 
-#include <futils/list.h>
-#include <futils/random.h>
-#include <futils/systimetools.h>
-#include <futils/timetools.h>
+#include <futils/futils.h>
 #include <h264/h264.h>
 #include <libpomp.h>
 #include <rtp/rtp.h>
@@ -59,6 +59,7 @@
 struct vstrm_timestamp;
 
 #include "vstrm_clock_delta.h"
+#include "vstrm_event.h"
 #include "vstrm_rtcp_app.h"
 #include "vstrm_rtp_h264.h"
 #include "vstrm_video_stats_priv.h"
@@ -67,6 +68,10 @@ struct vstrm_timestamp;
 #define VSTRM_H264_MB_STATUS_ZONE_COUNT 5
 
 #define VSTRM_USECS_PER_SEC 1000000
+
+#define VSTRM_METADATA_PROTO_EXT_ID 0x5062 /* "Pb" */
+
+#define VSTRM_METADATA_PROTO_HEADER_LEN 8
 
 
 struct vstrm_timestamp {

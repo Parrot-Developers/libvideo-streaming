@@ -24,14 +24,32 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _VSTRM_RTCP_APP_H_
-#define _VSTRM_RTCP_APP_H_
+#ifndef _VSTRM_EVENT_H_
+#define _VSTRM_EVENT_H_
 
 
-#define VSTRM_RTCP_APP_PACKET_NAME 0x41525354
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_CLOCK_DELTA 1
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_VIDEO_STATS 2
-#define VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT 3
+/* Event message version number */
+#define VSTRM_EVENT_MSG_VERSION 1
 
 
-#endif /* !_VSTRM_RTCP_APP_H_ */
+/* Event message */
+struct vstrm_event_msg {
+	/* Event message version, see VSTRM_EVENT_MSG_VERSION */
+	uint8_t version;
+
+	/* Event type, see enum vstrm_event */
+	uint8_t event;
+};
+
+
+int vstrm_event_write(struct pomp_buffer *buf,
+		      size_t *pos,
+		      enum vstrm_event event);
+
+
+int vstrm_event_read(struct pomp_buffer *buf,
+		     size_t *pos,
+		     enum vstrm_event *event);
+
+
+#endif /* !_VSTRM_CLOCK_DELTA_H_ */

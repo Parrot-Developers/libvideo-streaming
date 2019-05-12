@@ -91,6 +91,8 @@ void vstrm_frame_unref(struct vstrm_frame *self)
 
 		(*self->ops.dispose)(self);
 		vstrm_video_stats_dyn_clear(&self->video_stats_dyn);
+		if (self->metadata)
+			vmeta_frame_unref(self->metadata);
 		free(self->nalus);
 		free(self);
 	}

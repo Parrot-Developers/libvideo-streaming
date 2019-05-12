@@ -33,30 +33,41 @@ ULOG_DECLARE_TAG(vstrm_test_receiver);
 
 static void socket_data_cb(int fd, uint32_t events, void *userdata)
 {
-	int res = 0;
+	int res;
 	struct vstrm_test_receiver *self = userdata;
 	ssize_t readlen = 0;
 	struct pomp_buffer *buf = NULL;
-	struct timespec ts = {0, 0};
+	struct tpkt_packet *pkt = NULL;
+	uint64_t ts = 0;
 
 	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
 
 	do {
 		/* Read data */
-		readlen = vstrm_test_socket_read(&self->data_sock);
+		readlen = tskt_socket_read(
+			self->data_sock, self->rx_buf, self->rx_buf_len, &ts);
 
 		/* Something read ? */
 		if (readlen > 0) {
 			/* TODO: Avoid copy */
-			buf = pomp_buffer_new_with_data(self->data_sock.rxbuf,
-							readlen);
-			res = time_get_monotonic(&ts);
-			if (res < 0)
-				ULOG_ERRNO("time_get_monotonic", -res);
-			res = vstrm_receiver_recv_data(
-				self->receiver, buf, &ts);
+			buf = pomp_buffer_new_with_data(self->rx_buf, readlen);
+			res = tpkt_new_from_buffer(buf, &pkt);
 			pomp_buffer_unref(buf);
 			buf = NULL;
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_new_from_buffer", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = tpkt_set_timestamp(pkt, ts);
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_set_timestamp", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = vstrm_receiver_recv_data(self->receiver, pkt);
+			tpkt_unref(pkt);
+			pkt = NULL;
 			if (res < 0)
 				ULOG_ERRNO("vstrm_receiver_recv_data", -res);
 		} else if (readlen == 0) {
@@ -68,30 +79,41 @@ static void socket_data_cb(int fd, uint32_t events, void *userdata)
 
 static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 {
-	int res = 0;
+	int res;
 	struct vstrm_test_receiver *self = userdata;
 	ssize_t readlen = 0;
 	struct pomp_buffer *buf = NULL;
-	struct timespec ts = {0, 0};
+	struct tpkt_packet *pkt = NULL;
+	uint64_t ts = 0;
 
 	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
 
 	do {
 		/* Read data */
-		readlen = vstrm_test_socket_read(&self->ctrl_sock);
+		readlen = tskt_socket_read(
+			self->ctrl_sock, self->rx_buf, self->rx_buf_len, &ts);
 
 		/* Something read ? */
 		if (readlen > 0) {
 			/* TODO: Avoid copy */
-			buf = pomp_buffer_new_with_data(self->ctrl_sock.rxbuf,
-							readlen);
-			res = time_get_monotonic(&ts);
-			if (res < 0)
-				ULOG_ERRNO("time_get_monotonic", -res);
-			res = vstrm_receiver_recv_ctrl(
-				self->receiver, buf, &ts);
+			buf = pomp_buffer_new_with_data(self->rx_buf, readlen);
+			res = tpkt_new_from_buffer(buf, &pkt);
 			pomp_buffer_unref(buf);
 			buf = NULL;
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_new_from_buffer", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = tpkt_set_timestamp(pkt, ts);
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_set_timestamp", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = vstrm_receiver_recv_ctrl(self->receiver, pkt);
+			tpkt_unref(pkt);
+			pkt = NULL;
 			if (res < 0)
 				ULOG_ERRNO("vstrm_receiver_recv_ctrl", -res);
 		} else if (readlen == 0) {
@@ -102,21 +124,20 @@ static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 
 
 static int send_ctrl_cb(struct vstrm_receiver *stream,
-			struct pomp_buffer *buf,
+			struct tpkt_packet *pkt,
 			void *userdata)
 {
 	struct vstrm_test_receiver *self = userdata;
-	const void *cdata = NULL;
-	size_t len = 0;
-	ssize_t writelen = 0;
+	int res;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
 
-	/* Write data */
-	pomp_buffer_get_cdata(buf, &cdata, &len, NULL);
-	writelen = vstrm_test_socket_write(&self->ctrl_sock, cdata, len);
-	return (writelen >= 0) ? 0 : (int)writelen;
+	res = tskt_socket_write_pkt(self->ctrl_sock, pkt);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_write_pkt", -res);
+
+	return res;
 }
 
 
@@ -257,53 +278,89 @@ int vstrm_test_receiver_create(const char *local_addr,
 		goto out;
 	}
 
-	/* Setup the data socket */
-	res = vstrm_test_socket_setup(&self->data_sock,
-				      local_addr,
-				      local_data_port,
-				      remote_addr,
-				      remote_data_port,
-				      self->loop,
-				      &socket_data_cb,
-				      self);
-	if (res < 0)
+	/* Create the rx buffer */
+	self->rx_buf_len = DEFAULT_RX_BUFFER_SIZE;
+	self->rx_buf = malloc(self->rx_buf_len);
+	if (self->rx_buf == NULL) {
+		res = -ENOMEM;
+		ULOG_ERRNO("malloc:rx_buf", -res);
 		goto out;
+	}
+
+	/* Setup the data socket */
+	res = tskt_socket_new(local_addr,
+			      local_data_port,
+			      remote_addr,
+			      remote_data_port,
+			      NULL,
+			      self->loop,
+			      &socket_data_cb,
+			      self,
+			      &self->data_sock);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_new", -res);
+		goto out;
+	}
 	ULOGI("RTP: address %s->%s port %u->%u",
 	      local_addr,
 	      remote_addr,
 	      *local_data_port,
 	      remote_data_port);
 
-	vstrm_test_socket_set_tx_size(&self->data_sock, DEFAULT_SNDBUF_SIZE);
-	vstrm_test_socket_set_class(&self->data_sock, TOS_CS4);
+	res = tskt_socket_set_txbuf_size(self->data_sock, DEFAULT_SNDBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_txbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_class_selector(self->data_sock,
+					     IPTOS_PREC_FLASHOVERRIDE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_class_selector", -res);
+		goto out;
+	}
 
 	/* Setup control socket */
-	res = vstrm_test_socket_setup(&self->ctrl_sock,
-				      local_addr,
-				      local_ctrl_port,
-				      remote_addr,
-				      remote_ctrl_port,
-				      self->loop,
-				      &socket_ctrl_cb,
-				      self);
-	if (res < 0)
+	res = tskt_socket_new(local_addr,
+			      local_ctrl_port,
+			      remote_addr,
+			      remote_ctrl_port,
+			      NULL,
+			      self->loop,
+			      &socket_ctrl_cb,
+			      self,
+			      &self->ctrl_sock);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_new", -res);
 		goto out;
+	}
 	ULOGI("RTCP: address %s<->%s port %u<->%u",
 	      local_addr,
 	      remote_addr,
 	      *local_ctrl_port,
 	      remote_ctrl_port);
 
-	vstrm_test_socket_set_rx_size(&self->ctrl_sock, DEFAULT_RCVBUF_SIZE);
-	vstrm_test_socket_set_tx_size(&self->ctrl_sock, DEFAULT_SNDBUF_SIZE);
-	vstrm_test_socket_set_class(&self->ctrl_sock, TOS_CS4);
+	res = tskt_socket_set_rxbuf_size(self->ctrl_sock, DEFAULT_RCVBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_rxbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_txbuf_size(self->ctrl_sock, DEFAULT_SNDBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_txbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_class_selector(self->ctrl_sock,
+					     IPTOS_PREC_FLASHOVERRIDE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_class_selector", -res);
+		goto out;
+	}
 
 	/* Receiver configuration */
 	memset(&vstrm_cfg, 0, sizeof(vstrm_cfg));
 	vstrm_cfg.loop = self->loop;
 	vstrm_cfg.flags = VSTRM_RECEIVER_FLAGS_H264_GEN_GREY_IDR_FRAME |
 			  VSTRM_RECEIVER_FLAGS_H264_GEN_CONCEALMENT_SLICE |
-			  VSTRM_RECEIVER_FLAGS_H264_FAKE_FRAME_NUM |
 			  VSTRM_RECEIVER_FLAGS_ENABLE_RTCP |
 			  VSTRM_RECEIVER_FLAGS_ENABLE_RTCP_EXT;
 
@@ -385,8 +442,12 @@ int vstrm_test_receiver_destroy(struct vstrm_test_receiver *self)
 		if (res < 0)
 			ULOG_ERRNO("vstrm_receiver_destroy", -res);
 	}
-	vstrm_test_socket_cleanup(&self->data_sock, self->loop);
-	vstrm_test_socket_cleanup(&self->ctrl_sock, self->loop);
+	res = tskt_socket_destroy(self->data_sock);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_destroy", -res);
+	res = tskt_socket_destroy(self->ctrl_sock);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_destroy", -res);
 	if (self->loop != NULL) {
 		res = pomp_loop_destroy(self->loop);
 		if (res < 0)
@@ -397,6 +458,7 @@ int vstrm_test_receiver_destroy(struct vstrm_test_receiver *self)
 		if (res != 0)
 			ULOG_ERRNO("fclose", -errno);
 	}
+	free(self->rx_buf);
 	free(self);
 
 	ULOGI("destroyed");

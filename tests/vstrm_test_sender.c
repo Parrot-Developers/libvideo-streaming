@@ -68,6 +68,7 @@ static int map_file(struct vstrm_test_sender *self)
 	int res;
 
 #ifdef _WIN32
+	BOOL ret;
 	LARGE_INTEGER filesize;
 
 	self->infile = CreateFileA(self->input_file,
@@ -91,8 +92,8 @@ static int map_file(struct vstrm_test_sender *self)
 		goto error;
 	}
 
-	res = GetFileSizeEx(self->infile, &filesize);
-	if (res == 0) {
+	ret = GetFileSizeEx(self->infile, &filesize);
+	if (ret == FALSE) {
 		res = -EIO;
 		ULOG_ERRNO("GetFileSizeEx('%s')", -res, self->input_file);
 		goto error;
@@ -163,7 +164,10 @@ static void socket_data_cb(int fd, uint32_t events, void *userdata)
 	if ((events & POMP_FD_EVENT_IN) != 0) {
 		do {
 			/* Read data (and trash them...) */
-			readlen = vstrm_test_socket_read(&self->data_sock);
+			readlen = tskt_socket_read(self->data_sock,
+						   self->rx_buf,
+						   self->rx_buf_len,
+						   NULL);
 		} while (readlen > 0);
 	}
 }
@@ -171,29 +175,41 @@ static void socket_data_cb(int fd, uint32_t events, void *userdata)
 
 static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 {
-	int res = 0;
+	int res;
 	struct vstrm_test_sender *self = userdata;
 	ssize_t readlen = 0;
 	struct pomp_buffer *buf = NULL;
-	struct timespec ts = {0, 0};
+	struct tpkt_packet *pkt = NULL;
+	uint64_t ts = 0;
 
 	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
 
 	do {
 		/* Read data */
-		readlen = vstrm_test_socket_read(&self->ctrl_sock);
+		readlen = tskt_socket_read(
+			self->ctrl_sock, self->rx_buf, self->rx_buf_len, &ts);
 
 		/* Something read ? */
 		if (readlen > 0) {
 			/* TODO: Avoid copy */
-			buf = pomp_buffer_new_with_data(self->ctrl_sock.rxbuf,
-							readlen);
-			res = time_get_monotonic(&ts);
-			if (res < 0)
-				ULOG_ERRNO("time_get_monotonic", -res);
-			res = vstrm_sender_recv_ctrl(self->sender, buf, &ts);
+			buf = pomp_buffer_new_with_data(self->rx_buf, readlen);
+			res = tpkt_new_from_buffer(buf, &pkt);
 			pomp_buffer_unref(buf);
 			buf = NULL;
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_new_from_buffer", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = tpkt_set_timestamp(pkt, ts);
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_set_timestamp", -res);
+				tpkt_unref(pkt);
+				break;
+			}
+			res = vstrm_sender_recv_ctrl(self->sender, pkt);
+			tpkt_unref(pkt);
+			pkt = NULL;
 			if (res < 0)
 				ULOG_ERRNO("vstrm_sender_recv_ctrl", -res);
 		} else if (readlen == 0) {
@@ -204,39 +220,39 @@ static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 
 
 static int send_data_cb(struct vstrm_sender *stream,
-			struct pomp_buffer *buf,
+			struct tpkt_packet *pkt,
 			void *userdata)
 {
 	struct vstrm_test_sender *self = userdata;
-	const void *cdata = NULL;
-	size_t len = 0;
-	ssize_t writelen = 0;
+	int res;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
 
 	/* Write data */
-	pomp_buffer_get_cdata(buf, &cdata, &len, NULL);
-	writelen = vstrm_test_socket_write(&self->data_sock, cdata, len);
-	return writelen >= 0 ? 0 : (int)writelen;
+	res = tskt_socket_write_pkt(self->data_sock, pkt);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_write_pkt", -res);
+
+	return res;
 }
 
 
 static int send_ctrl_cb(struct vstrm_sender *stream,
-			struct pomp_buffer *buf,
+			struct tpkt_packet *pkt,
 			void *userdata)
 {
 	struct vstrm_test_sender *self = userdata;
-	const void *cdata = NULL;
-	size_t len = 0;
-	ssize_t writelen = 0;
+	int res;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
 
-	/* Write data */
-	pomp_buffer_get_cdata(buf, &cdata, &len, NULL);
-	writelen = vstrm_test_socket_write(&self->ctrl_sock, cdata, len);
-	return writelen >= 0 ? 0 : (int)writelen;
+	res = tskt_socket_write_pkt(self->ctrl_sock, pkt);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_write_pkt", -res);
+
+	return res;
 }
 
 
@@ -249,13 +265,28 @@ static int monitor_send_data_ready_cb(struct vstrm_sender *stream,
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 
-	return pomp_loop_update(self->loop, self->data_sock.fd, events);
+	int fd = tskt_socket_get_fd(self->data_sock);
+	if (fd < 0) {
+		ULOG_ERRNO("tskt_socket_get_fd", -fd);
+		return fd;
+	}
+
+	return pomp_loop_update(self->loop, fd, events);
 }
 
 
 static void session_metadata_peer_changed_cb(struct vstrm_sender *stream,
 					     const struct vmeta_session *meta,
 					     void *userdata)
+{
+	ULOGI("%s", __func__);
+}
+
+
+static void receiver_report_cb(struct vstrm_sender *stream,
+			       const struct rtcp_pkt_receiver_report *rr,
+			       uint32_t rtd,
+			       void *userdata)
 {
 	ULOGI("%s", __func__);
 }
@@ -319,6 +350,7 @@ static void nalu_end_cb(struct h264_ctx *ctx,
 			enum h264_nalu_type type,
 			const uint8_t *buf,
 			size_t len,
+			const struct h264_nalu_header *nh,
 			void *userdata)
 {
 	int res;
@@ -480,6 +512,7 @@ static struct vstrm_sender_cbs vstrm_cbs = {
 	.send_ctrl = &send_ctrl_cb,
 	.monitor_send_data_ready = &monitor_send_data_ready_cb,
 	.session_metadata_peer_changed = &session_metadata_peer_changed_cb,
+	.receiver_report = &receiver_report_cb,
 	.video_stats = &video_stats_cb,
 	.goodbye = &goodbye_cb,
 };
@@ -549,17 +582,29 @@ int vstrm_test_sender_create(const char *file,
 		goto out;
 	}
 
-	/* Setup the data socket */
-	res = vstrm_test_socket_setup(&self->data_sock,
-				      local_addr,
-				      &local_data_port,
-				      remote_addr,
-				      remote_data_port,
-				      self->loop,
-				      &socket_data_cb,
-				      self);
-	if (res < 0)
+	/* Create the rx buffer */
+	self->rx_buf_len = DEFAULT_RX_BUFFER_SIZE;
+	self->rx_buf = malloc(self->rx_buf_len);
+	if (self->rx_buf == NULL) {
+		res = -ENOMEM;
+		ULOG_ERRNO("malloc:rx_buf", -res);
 		goto out;
+	}
+
+	/* Setup the data socket */
+	res = tskt_socket_new(local_addr,
+			      &local_data_port,
+			      remote_addr,
+			      remote_data_port,
+			      NULL,
+			      self->loop,
+			      &socket_data_cb,
+			      self,
+			      &self->data_sock);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_new", -res);
+		goto out;
+	}
 	ULOGI("RTP: address %s->%s port %u->%u",
 	      local_addr,
 	      remote_addr,
@@ -567,30 +612,59 @@ int vstrm_test_sender_create(const char *file,
 	      remote_data_port);
 
 	tx_size = get_socket_data_tx_size(MAX_BITRATE, MAX_LATENCY_MS);
-	vstrm_test_socket_set_rx_size(&self->data_sock, DEFAULT_RCVBUF_SIZE);
-	vstrm_test_socket_set_tx_size(&self->data_sock, tx_size);
-	vstrm_test_socket_set_class(&self->data_sock, TOS_CS4);
+	res = tskt_socket_set_rxbuf_size(self->data_sock, DEFAULT_RCVBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_rxbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_txbuf_size(self->data_sock, tx_size);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_txbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_class_selector(self->data_sock,
+					     IPTOS_PREC_FLASHOVERRIDE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_class_selector", -res);
+		goto out;
+	}
 
 	/* Setup control socket */
-	res = vstrm_test_socket_setup(&self->ctrl_sock,
-				      local_addr,
-				      &local_ctrl_port,
-				      remote_addr,
-				      remote_ctrl_port,
-				      self->loop,
-				      &socket_ctrl_cb,
-				      self);
-	if (res < 0)
+	res = tskt_socket_new(local_addr,
+			      &local_ctrl_port,
+			      remote_addr,
+			      remote_ctrl_port,
+			      NULL,
+			      self->loop,
+			      &socket_ctrl_cb,
+			      self,
+			      &self->ctrl_sock);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_new", -res);
 		goto out;
+	}
 	ULOGI("RTCP: address %s<->%s port %u<->%u",
 	      local_addr,
 	      remote_addr,
 	      local_ctrl_port,
 	      remote_ctrl_port);
 
-	vstrm_test_socket_set_rx_size(&self->ctrl_sock, DEFAULT_RCVBUF_SIZE);
-	vstrm_test_socket_set_tx_size(&self->ctrl_sock, DEFAULT_SNDBUF_SIZE);
-	vstrm_test_socket_set_class(&self->ctrl_sock, TOS_CS4);
+	res = tskt_socket_set_rxbuf_size(self->ctrl_sock, DEFAULT_RCVBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_rxbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_txbuf_size(self->ctrl_sock, DEFAULT_SNDBUF_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_txbuf_size", -res);
+		goto out;
+	}
+	res = tskt_socket_set_class_selector(self->ctrl_sock,
+					     IPTOS_PREC_FLASHOVERRIDE);
+	if (res < 0) {
+		ULOG_ERRNO("tskt_socket_set_class_selector", -res);
+		goto out;
+	}
 
 	/* Sender configuration */
 	memset(&vstrm_cfg, 0, sizeof(vstrm_cfg));
@@ -699,8 +773,12 @@ int vstrm_test_sender_destroy(struct vstrm_test_sender *self)
 		if (res < 0)
 			ULOG_ERRNO("vstrm_sender_destroy", -res);
 	}
-	vstrm_test_socket_cleanup(&self->data_sock, self->loop);
-	vstrm_test_socket_cleanup(&self->ctrl_sock, self->loop);
+	res = tskt_socket_destroy(self->data_sock);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_destroy", -res);
+	res = tskt_socket_destroy(self->ctrl_sock);
+	if (res < 0)
+		ULOG_ERRNO("tskt_socket_destroy", -res);
 	if (self->reader != NULL) {
 		res = h264_reader_destroy(self->reader);
 		if (res < 0)
@@ -721,6 +799,7 @@ int vstrm_test_sender_destroy(struct vstrm_test_sender *self)
 		vstrm_frame_unref(self->frame);
 	free(self->sps);
 	free(self->pps);
+	free(self->rx_buf);
 	free(self);
 
 	ULOGI("destroyed");

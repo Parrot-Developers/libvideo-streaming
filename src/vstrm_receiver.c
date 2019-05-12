@@ -222,6 +222,25 @@ static void vstrm_receiver_rtcp_app_clock_delta_cb(struct vstrm_receiver *self,
 }
 
 
+static void vstrm_receiver_rtcp_app_event_cb(struct vstrm_receiver *self,
+					     struct pomp_buffer *buf)
+{
+	int res = 0;
+	size_t pos = 0;
+	enum vstrm_event event;
+
+	/* Decode payload */
+	res = vstrm_event_read(buf, &pos, &event);
+	if (res < 0) {
+		ULOG_ERRNO("vstrm_event_read", -res);
+		return;
+	}
+
+	if (self->cbs.event != NULL)
+		self->cbs.event(self, event, self->cbs_userdata);
+}
+
+
 static void vstrm_receiver_rtcp_app_cb(const struct rtcp_pkt_app *app,
 				       void *userdata)
 {
@@ -237,6 +256,9 @@ static void vstrm_receiver_rtcp_app_cb(const struct rtcp_pkt_app *app,
 		switch (app->subtype) {
 		case VSTRM_RTCP_APP_PACKET_SUBTYPE_CLOCK_DELTA:
 			vstrm_receiver_rtcp_app_clock_delta_cb(self, buf);
+			break;
+		case VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT:
+			vstrm_receiver_rtcp_app_event_cb(self, buf);
 			break;
 		}
 	}
@@ -514,6 +536,7 @@ static int vstrm_receiver_write_rtcp(struct vstrm_receiver *self,
 	struct timespec cur_ts = {0, 0};
 	uint64_t cur_timestamp = 0;
 	struct pomp_buffer *buf = NULL;
+	struct tpkt_packet *pkt = NULL;
 	size_t pos = 0;
 	int full_sdes;
 
@@ -570,11 +593,17 @@ static int vstrm_receiver_write_rtcp(struct vstrm_receiver *self,
 	}
 
 	/* Send buffer (ignore EAGAIN and drop the packet) */
-	res = (*self->cbs.send_ctrl)(self, buf, self->cbs_userdata);
+	res = tpkt_new_from_buffer(buf, &pkt);
+	if (res < 0) {
+		ULOG_ERRNO("tpkt_new_from_buffer", -res);
+		goto out;
+	}
+	res = (*self->cbs.send_ctrl)(self, pkt, self->cbs_userdata);
 	if (res < 0 && res != -EAGAIN)
 		ULOG_ERRNO("cbs.send_ctrl", -res);
 
 out:
+	tpkt_unref(pkt);
 	if (buf != NULL)
 		pomp_buffer_unref(buf);
 	return res;
@@ -819,7 +848,8 @@ static void vstrm_receiver_init_source(struct vstrm_receiver *self,
 	/* TODO: make the probation configurable */
 	self->source.probation = MIN_SEQUENTIAL;
 
-	if ((self->cfg.flags & VSTRM_RECEIVER_FLAGS_ENABLE_RTCP) != 0) {
+	if (((self->cfg.flags & VSTRM_RECEIVER_FLAGS_ENABLE_RTCP) != 0) &&
+	    (self->cfg.loop != NULL)) {
 		self->source.rtcp_timer = pomp_timer_new(
 			self->cfg.loop, &vstrm_receiver_rtcp_timer_cb, self);
 		res = pomp_timer_set_periodic(self->source.rtcp_timer,
@@ -933,41 +963,43 @@ int vstrm_receiver_destroy(struct vstrm_receiver *self)
 
 
 int vstrm_receiver_recv_data(struct vstrm_receiver *self,
-			     struct pomp_buffer *buf,
-			     const struct timespec *ts)
+			     struct tpkt_packet *pkt)
 {
 	int res = 0;
-	struct rtp_pkt *pkt = NULL;
+	struct rtp_pkt *rtp_pkt = NULL;
 	struct timespec cur_ts = {0, 0};
 	uint64_t cur_timestamp = 0;
+	struct pomp_buffer *buf;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
+
+	buf = tpkt_get_buffer(pkt);
 	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(ts == NULL, EINVAL);
 
 	time_get_monotonic(&cur_ts);
 	time_timespec_to_us(&cur_ts, &cur_timestamp);
 
 	/* Read packet */
-	res = rtp_pkt_new(&pkt);
+	res = rtp_pkt_new(&rtp_pkt);
 	if (res < 0)
 		goto out;
-	res = rtp_pkt_read(buf, pkt);
+	res = rtp_pkt_read(buf, rtp_pkt);
 	if (res < 0)
 		goto out;
 
-	time_timespec_to_us(ts, &pkt->in_timestamp);
+	rtp_pkt->in_timestamp = tpkt_get_timestamp(pkt);
 	/* TODO: handle wrap */
-	pkt->rtp_timestamp = pkt->header.timestamp;
+	rtp_pkt->rtp_timestamp = rtp_pkt->header.timestamp;
 
 	/* Initialize source (or reset it) */
-	if (self->source.ssrc != pkt->header.ssrc) {
+	if (self->source.ssrc != rtp_pkt->header.ssrc) {
 		vstrm_receiver_init_source(
-			self, pkt->header.ssrc, pkt->header.seqnum);
+			self, rtp_pkt->header.ssrc, rtp_pkt->header.seqnum);
 	} else {
-		res = vstrm_receiver_update_seq(self, pkt->header.seqnum);
+		res = vstrm_receiver_update_seq(self, rtp_pkt->header.seqnum);
 		if (res == 1)
-			self->source.received_bytes += pkt->raw.len;
+			self->source.received_bytes += rtp_pkt->raw.len;
 	}
 
 	if (self->dbg.rtp_in != NULL)
@@ -977,15 +1009,15 @@ int vstrm_receiver_recv_data(struct vstrm_receiver *self,
 	/* TODO: do it after setting up timestamp from jitter buffer, but before
 	 * queuing it (and transferring ownership to jitter buffer) */
 	if (self->cbs.recv_rtp_pkt != NULL)
-		(*self->cbs.recv_rtp_pkt)(self, pkt, self->cbs_userdata);
+		(*self->cbs.recv_rtp_pkt)(self, rtp_pkt, self->cbs_userdata);
 
 	/* Add in jitter buffer */
-	res = rtp_jitter_enqueue(self->source.rtp_jitter, pkt);
+	res = rtp_jitter_enqueue(self->source.rtp_jitter, rtp_pkt);
 	if (res < 0)
 		goto out;
 
 	/* Jitter buffer has now ownership of packet */
-	pkt = NULL;
+	rtp_pkt = NULL;
 
 	/* Try to process packets */
 	if (!self->source.probation) {
@@ -996,8 +1028,8 @@ int vstrm_receiver_recv_data(struct vstrm_receiver *self,
 	}
 
 out:
-	if (pkt != NULL)
-		rtp_pkt_destroy(pkt);
+	if (rtp_pkt != NULL)
+		rtp_pkt_destroy(rtp_pkt);
 	return res;
 }
 
@@ -1011,19 +1043,21 @@ static const struct rtcp_pkt_read_cbs rtcp_cbs = {
 
 
 int vstrm_receiver_recv_ctrl(struct vstrm_receiver *self,
-			     struct pomp_buffer *buf,
-			     const struct timespec *ts)
+			     struct tpkt_packet *pkt)
 {
 	int res = 0;
 	struct vmeta_session old_session_metadata_peer;
+	struct pomp_buffer *buf;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
+
+	buf = tpkt_get_buffer(pkt);
 	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(ts == NULL, EINVAL);
 
 	/* TODO: check SSRC? what if RTCP is received before any RTP? */
 
-	time_timespec_to_us(ts, &self->source.rtcp_recv_ts);
+	self->source.rtcp_recv_ts = tpkt_get_timestamp(pkt);
 
 	/* Remember session metadata before parsing new one found in this
 	 * RTCP packet */
@@ -1073,16 +1107,6 @@ int vstrm_receiver_set_codec_info(struct vstrm_receiver *self,
 	} else {
 		return 0;
 	}
-}
-
-
-int vstrm_receiver_generate_grey_i_frame(struct vstrm_receiver *self,
-					 struct vstrm_frame **ret_frame)
-{
-	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-
-	return vstrm_rtp_h264_rx_generate_grey_i_frame(self->rtp_h264,
-						       ret_frame);
 }
 
 

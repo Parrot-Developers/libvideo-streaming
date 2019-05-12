@@ -63,6 +63,9 @@ struct vstrm_sender {
 	struct vstrm_video_stats video_stats;
 	struct vstrm_video_stats_dyn video_stats_dyn;
 
+	bool invalid_rtd;
+	uint64_t invalid_rtd_count;
+
 	struct {
 		char *dir;
 		FILE *stream;
@@ -83,9 +86,44 @@ vstrm_sender_rtcp_receiver_report_cb(const struct rtcp_pkt_receiver_report *rr,
 	struct vstrm_sender *self = userdata;
 	self->peer_ssrc = rr->ssrc;
 
+	uint32_t rtd_us = UINT32_MAX;
+	if (rr->report_count > 0) {
+		/* Compute the round-trip delay (see RFC3550 chap. 6.4.1) */
+		struct ntp_timestamp32 a_32 = {0};
+		ntp_timestamp32_from_us(&a_32, self->rtcp_recv_ts);
+		struct ntp_timestamp64 a = {0};
+		ntp_timestamp32_to_ntp_timestamp64(&a_32, &a);
+		struct ntp_timestamp64 lsr = {0};
+		ntp_timestamp32_to_ntp_timestamp64(&rr->reports[0].lsr, &lsr);
+		int64_t diff = 0;
+		ntp_timestamp64_diff_us(&a, &lsr, &diff);
+		while (diff < 0) {
+			a.seconds += (1 << 16);
+			ntp_timestamp64_diff_us(&a, &lsr, &diff);
+		}
+		int64_t dlsr = ((uint64_t)rr->reports[0].dlsr * 1000000) >> 16;
+		if (dlsr > diff) {
+			if (!self->invalid_rtd) {
+				self->invalid_rtd = true;
+				ULOGE("invalid DLSR vs. time diff for RTD");
+			}
+			self->invalid_rtd_count++;
+		} else {
+			rtd_us = diff - dlsr;
+			if (self->invalid_rtd) {
+				self->invalid_rtd = false;
+				ULOGE("RTD is now valid (%" PRIu64
+				      " invalid RTD(s))",
+				      self->invalid_rtd_count);
+				self->invalid_rtd_count = 0;
+			}
+		}
+	}
+
 	if (self->cbs.receiver_report != NULL) {
 		/* Notify callback */
-		(*self->cbs.receiver_report)(self, rr, self->cbs_userdata);
+		(*self->cbs.receiver_report)(
+			self, rr, rtd_us, self->cbs_userdata);
 	}
 }
 
@@ -342,6 +380,53 @@ out:
 }
 
 
+static int vstrm_sender_write_rtcp_event(struct vstrm_sender *self,
+					 struct pomp_buffer *buf,
+					 size_t *pos,
+					 enum vstrm_event event)
+{
+	int res = 0;
+	struct pomp_buffer *buf2 = NULL;
+	size_t pos2 = 0;
+	struct rtcp_pkt_app app;
+	const void *cdata = NULL;
+	size_t len = 0;
+
+	/* Serialize data in a temp buffer */
+	buf2 = pomp_buffer_new(0);
+	if (buf2 == NULL) {
+		res = -ENOMEM;
+		goto out;
+	}
+	res = vstrm_event_write(buf2, &pos2, event);
+	if (res < 0) {
+		ULOG_ERRNO("vstrm_event_write", -res);
+		goto out;
+	}
+	pomp_buffer_get_cdata(buf2, &cdata, &len, NULL);
+
+	/* Setup RTCP app structure */
+	memset(&app, 0, sizeof(app));
+	app.ssrc = self->ssrc;
+	app.name = VSTRM_RTCP_APP_PACKET_NAME;
+	app.subtype = VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT;
+	app.data = cdata;
+	app.data_len = len;
+
+	/* Write in packet */
+	res = rtcp_pkt_write_app(buf, pos, &app);
+	if (res < 0) {
+		ULOG_ERRNO("rtcp_pkt_write_app", -res);
+		goto out;
+	}
+
+out:
+	if (buf2 != NULL)
+		pomp_buffer_unref(buf2);
+	return res;
+}
+
+
 static int vstrm_sender_write_rtcp_goodbye(struct vstrm_sender *self,
 					   struct pomp_buffer *buf,
 					   size_t *pos,
@@ -371,12 +456,15 @@ static int vstrm_sender_write_rtcp_goodbye(struct vstrm_sender *self,
 
 static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 				   int bye,
-				   const char *bye_reason)
+				   const char *bye_reason,
+				   int send_event,
+				   enum vstrm_event event)
 {
 	int res = 0;
 	struct timespec cur_ts = {0, 0};
 	uint64_t cur_timestamp = 0;
 	struct pomp_buffer *buf = NULL;
+	struct tpkt_packet *pkt = NULL;
 	size_t pos = 0;
 	int full_sdes;
 
@@ -420,6 +508,13 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 		self->clock_delta_send_ts = cur_timestamp;
 	}
 
+	if (((self->cfg.flags & VSTRM_SENDER_FLAGS_ENABLE_RTCP_EXT) != 0) &&
+	    (send_event)) {
+		res = vstrm_sender_write_rtcp_event(self, buf, &pos, event);
+		if (res < 0)
+			goto out;
+	}
+
 	if (bye) {
 		res = vstrm_sender_write_rtcp_goodbye(
 			self, buf, &pos, bye_reason);
@@ -428,11 +523,17 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 	}
 
 	/* Send buffer (ignore EAGAIN and drop the packet) */
-	res = (*self->cbs.send_ctrl)(self, buf, self->cbs_userdata);
+	res = tpkt_new_from_buffer(buf, &pkt);
+	if (res < 0) {
+		ULOG_ERRNO("tpkt_new_from_buffer", -res);
+		goto out;
+	}
+	res = (*self->cbs.send_ctrl)(self, pkt, self->cbs_userdata);
 	if (res < 0 && res != -EAGAIN)
 		ULOG_ERRNO("cbs.send_ctrl", -res);
 
 out:
+	tpkt_unref(pkt);
 	if (buf != NULL)
 		pomp_buffer_unref(buf);
 	return res;
@@ -442,7 +543,7 @@ out:
 static void vstrm_sender_rtcp_timer_cb(struct pomp_timer *timer, void *userdata)
 {
 	struct vstrm_sender *self = userdata;
-	vstrm_sender_write_rtcp(self, 0, NULL);
+	vstrm_sender_write_rtcp(self, 0, NULL, 0, VSTRM_EVENT_NONE);
 }
 
 
@@ -464,34 +565,41 @@ static void vstrm_sender_monitor_send_data_ready(struct vstrm_sender *self,
 static void vstrm_sender_process_queue(struct vstrm_sender *self)
 {
 	int res = 0;
-	struct rtp_pkt *pkt = NULL;
-	struct rtp_pkt *pkt2 = NULL;
+	struct rtp_pkt *rtp_pkt = NULL;
+	struct rtp_pkt *tmp_pkt = NULL;
+	struct tpkt_packet *pkt = NULL;
 	struct timespec ts = {0, 0};
 	uint64_t cur_timestamp = 0;
 	uint64_t delta = 0;
 
 	while (!list_is_empty(&self->packets)) {
 		/* Get next packet */
-		pkt = list_entry(
+		rtp_pkt = list_entry(
 			list_first(&self->packets), struct rtp_pkt, node);
-		if (pkt == NULL)
+		if (rtp_pkt == NULL)
 			break;
+		res = tpkt_new_from_buffer(rtp_pkt->raw.buf, &pkt);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_new_from_buffer", -res);
+			break;
+		}
 
 		/* Send packet, consider it handled if success or error
 		 * that is not try again later (lower queue full) */
-		res = (*self->cbs.send_data)(
-			self, pkt->raw.buf, self->cbs_userdata);
+		res = (*self->cbs.send_data)(self, pkt, self->cbs_userdata);
+		tpkt_unref(pkt);
+		pkt = NULL;
 		if (res == 0 || res != -EAGAIN) {
 			if (res != 0) {
 				ULOG_ERRNO("cbs.send_data", -res);
 			} else if (self->dbg.rtp_out != NULL) {
 				vstrm_dbg_write_pomp_buf(self->dbg.rtp_out,
-							 pkt->raw.buf);
+							 rtp_pkt->raw.buf);
 			}
 			self->stats.total_packet_count++;
-			self->stats.total_byte_count += pkt->payload.len;
-			list_del(&pkt->node);
-			rtp_pkt_destroy(pkt);
+			self->stats.total_byte_count += rtp_pkt->payload.len;
+			list_del(&rtp_pkt->node);
+			rtp_pkt_destroy(rtp_pkt);
 		} else {
 			/* Queue full */
 			break;
@@ -503,23 +611,23 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 
 	/* Remove packets on timeout, but still account for them
 	 * in sender reports */
-	list_walk_entry_forward_safe(&self->packets, pkt, pkt2, node)
+	list_walk_entry_forward_safe(&self->packets, rtp_pkt, tmp_pkt, node)
 	{
-		if (cur_timestamp > pkt->out_timestamp &&
-		    pkt->out_timestamp != 0) {
-			delta = cur_timestamp - pkt->out_timestamp;
+		if (cur_timestamp > rtp_pkt->out_timestamp &&
+		    rtp_pkt->out_timestamp != 0) {
+			delta = cur_timestamp - rtp_pkt->out_timestamp;
 			ULOGD("drop packet: seqnum=%u size=%zu "
 			      "importance=%" PRIu32 " (%ums late)",
-			      pkt->header.seqnum,
-			      pkt->raw.len,
-			      pkt->importance,
+			      rtp_pkt->header.seqnum,
+			      rtp_pkt->raw.len,
+			      rtp_pkt->importance,
 			      (unsigned int)(delta / 1000));
 			self->stats.total_packet_count++;
-			self->stats.total_byte_count += pkt->payload.len;
+			self->stats.total_byte_count += rtp_pkt->payload.len;
 			self->stats.dropped_packet_count++;
-			self->stats.dropped_byte_count += pkt->payload.len;
-			list_del(&pkt->node);
-			rtp_pkt_destroy(pkt);
+			self->stats.dropped_byte_count += rtp_pkt->payload.len;
+			list_del(&rtp_pkt->node);
+			rtp_pkt_destroy(rtp_pkt);
 		}
 	}
 
@@ -819,11 +927,19 @@ int vstrm_sender_send_rtp_pkt(struct vstrm_sender *self, struct rtp_pkt *pkt)
 }
 
 
+int vstrm_sender_send_event(struct vstrm_sender *self, enum vstrm_event event)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+
+	return vstrm_sender_write_rtcp(self, 0, NULL, 1, event);
+}
+
+
 int vstrm_sender_send_goodbye(struct vstrm_sender *self, const char *reason)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 
-	return vstrm_sender_write_rtcp(self, 1, reason);
+	return vstrm_sender_write_rtcp(self, 1, reason, 0, VSTRM_EVENT_NONE);
 }
 
 
@@ -835,18 +951,19 @@ static const struct rtcp_pkt_read_cbs rtcp_cbs = {
 };
 
 
-int vstrm_sender_recv_ctrl(struct vstrm_sender *self,
-			   struct pomp_buffer *buf,
-			   const struct timespec *ts)
+int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt)
 {
 	int res = 0;
 	struct vmeta_session old_session_metadata_peer;
+	struct pomp_buffer *buf;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(ts == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
 
-	time_timespec_to_us(ts, &self->rtcp_recv_ts);
+	buf = tpkt_get_buffer(pkt);
+	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
+
+	self->rtcp_recv_ts = tpkt_get_timestamp(pkt);
 
 	/* Remember session metadata before parsing new one found in this
 	 * RTCP packet */

@@ -69,16 +69,16 @@ struct vstrm_rtp_h264_rx {
 
 	struct {
 		struct vstrm_rtp_h264_rx_frame *frame;
-		struct vmeta_frame metadata;
+		struct vmeta_frame *metadata;
 		struct vstrm_frame_info info;
 		struct vstrm_timestamp timestamp;
 		struct vstrm_timestamp last_timestamp;
 		uint64_t last_out_timestamp;
 		uint32_t frame_num;
-		uint32_t fake_frame_num;
 		uint32_t prev_frame_num;
 		int first;
 		int idr;
+		int recovery_point;
 	} au;
 
 	struct {
@@ -121,6 +121,19 @@ struct vstrm_rtp_h264_rx {
 		int valid;
 		struct vstrm_h264_sei_streaming_v2 sei;
 	} info_v2;
+
+	struct {
+		int valid;
+		struct vstrm_h264_sei_streaming_v4 sei;
+	} info_v4;
+
+	struct {
+		uint64_t pack_bf_low;
+		uint64_t pack_bf_high;
+		uint8_t *buf;
+		size_t len;
+		size_t capacity;
+	} metadata;
 };
 
 
@@ -210,6 +223,7 @@ static void vstrm_rtp_h264_rx_nalu_begin_cb(struct h264_ctx *ctx,
 					    enum h264_nalu_type type,
 					    const uint8_t *buf,
 					    size_t len,
+					    const struct h264_nalu_header *nh,
 					    void *userdata)
 {
 }
@@ -255,6 +269,18 @@ static void vstrm_rtp_h264_rx_slice_cb(struct h264_ctx *ctx,
 	default:
 		self->slice.mb_status = VSTRM_FRAME_MB_STATUS_UNKNOWN;
 		break;
+	}
+
+
+	if (sh->rplm.ref_pic_list_modification_flag_l0) {
+		for (int i = 0;
+		     sh->rplm.pic_num_l0[i].modification_of_pic_nums_idc != 3;
+		     i++) {
+			self->au.info.uses_ltr =
+				self->au.info.uses_ltr ||
+				(sh->rplm.pic_num_l0[i]
+					 .modification_of_pic_nums_idc == 2);
+		}
 	}
 }
 
@@ -366,6 +392,18 @@ static void vstrm_rtp_h264_rx_pps_cb(struct h264_ctx *ctx,
 }
 
 
+static void vstrm_rtp_h264_rx_sei_recovery_point_cb(
+	struct h264_ctx *ctx,
+	const uint8_t *buf,
+	size_t len,
+	const struct h264_sei_recovery_point *sei,
+	void *userdata)
+{
+	struct vstrm_rtp_h264_rx *self = userdata;
+	self->au.recovery_point = 1;
+}
+
+
 static void vstrm_rtp_h264_rx_sei_user_data_unregistered_cb(
 	struct h264_ctx *ctx,
 	const uint8_t *buf,
@@ -391,6 +429,13 @@ static void vstrm_rtp_h264_rx_sei_user_data_unregistered_cb(
 			ULOG_ERRNO("vstrm_h264_sei_streaming_v2_read", -res);
 		else
 			self->info_v2.valid = 1;
+	} else if (vstrm_h264_sei_streaming_is_v4(sei->uuid)) {
+		res = vstrm_h264_sei_streaming_v4_read(
+			&self->info_v4.sei, sei->uuid, sei->buf, sei->len);
+		if (res < 0)
+			ULOG_ERRNO("vstrm_h264_sei_streaming_v4_read", -res);
+		else
+			self->info_v4.valid = 1;
 	}
 }
 
@@ -604,9 +649,6 @@ vstrm_rtp_h264_rx_gen_grey_i_frame(struct vstrm_rtp_h264_rx *self,
 	vstrm_video_stats_dyn_copy(&(*frame)->base->video_stats_dyn,
 				   &self->video_stats_dyn);
 
-	/* Update the next fake frame_num */
-	self->au.fake_frame_num = 1;
-
 out:
 	if (buf != NULL)
 		pomp_buffer_unref(buf);
@@ -662,8 +704,6 @@ vstrm_rtp_h264_rx_gen_skipped_p_slice(struct vstrm_rtp_h264_rx *self,
 		self->tmp_slice_header = *ref_sh;
 	self->tmp_slice_header.first_mb_in_slice = mb_start;
 	self->tmp_slice_header.slice_type = H264_SLICE_TYPE_P;
-	if (CHECK_FLAG(self->cfg.flags, H264_FAKE_FRAME_NUM))
-		self->tmp_slice_header.frame_num = self->au.fake_frame_num;
 	self->tmp_slice_header.redundant_pic_cnt = 0;
 	self->tmp_slice_header.direct_spatial_mv_pred_flag = 0;
 	self->tmp_slice_header.slice_qp_delta = 0;
@@ -706,38 +746,6 @@ out:
 		pomp_buffer_unref(*buf);
 		*buf = NULL;
 	}
-	return res;
-}
-
-
-static int
-vstrm_rtp_h264_rx_regen_slice_header(struct vstrm_rtp_h264_rx *self,
-				     struct pomp_buffer *buf,
-				     struct vstrm_rtp_h264_rx_slice *slice)
-{
-	int res = 0;
-	struct h264_ctx *ctx = h264_reader_get_ctx(self->reader);
-	void *data = NULL;
-	size_t len = 0;
-	struct h264_bitstream bs;
-
-	self->tmp_slice_header = slice->slice_header;
-	self->tmp_slice_header.frame_num = self->au.fake_frame_num;
-
-	pomp_buffer_get_data(buf, &data, &len, NULL);
-	if (data == NULL) {
-		ULOG_ERRNO("pomp_buffer_get_data", EIO);
-		return -EIO;
-	}
-	h264_bs_init(&bs, data, len, 1);
-
-	/* Rewrite the slice */
-	res = h264_rewrite_slice_header(&bs, ctx, &self->tmp_slice_header);
-	if (res < 0)
-		ULOG_ERRNO("h264_rewrite_slice_header", -res);
-	else
-		slice->slice_header = self->tmp_slice_header;
-
 	return res;
 }
 
@@ -914,6 +922,8 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 	vstrm_rtp_h264_rx_map_timestamps(&self->au.timestamp,
 					 &self->au.frame->base->timestamps);
 	self->au.frame->base->metadata = self->au.metadata;
+	if (self->au.frame->base->metadata)
+		vmeta_frame_ref(self->au.frame->base->metadata);
 
 	/* Update timing statistics */
 	if (!self->au.first)
@@ -970,16 +980,11 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 	    CHECK_FLAG(self->cfg.flags, H264_GEN_CONCEALMENT_SLICE)) {
 		ULOGW("rtp_h264: incomplete frame");
 	}
+	self->au.frame->base->info.uses_ltr = self->au.info.uses_ltr;
 	(*self->cbs.recv_frame)(self, self->au.frame->base, self->cbs.userdata);
-	if (ref) {
-		/* Update the fake frame_num */
-		self->au.fake_frame_num =
-			(self->au.idr) ? 1
-				       : (self->au.fake_frame_num + 1) %
-						 self->max_frame_num;
-	}
 
 out:
+	self->au.info.uses_ltr = false;
 	/* Frame no more needed */
 	if (self->au.frame != NULL)
 		vstrm_frame_unref(self->au.frame->base);
@@ -988,8 +993,13 @@ out:
 	/* Reset for next frame */
 	self->nalu.first = 1;
 	self->nalu.last = 0;
-	memset(&self->au.metadata, 0, sizeof(self->au.metadata));
-	self->au.metadata.type = VMETA_FRAME_TYPE_NONE;
+	if (self->au.metadata) {
+		vmeta_frame_unref(self->au.metadata);
+		self->au.metadata = NULL;
+	}
+	self->metadata.pack_bf_low = UINT64_C(0);
+	self->metadata.pack_bf_high = UINT64_C(0);
+	self->metadata.len = 0;
 	memset(&self->au.timestamp, 0, sizeof(self->au.timestamp));
 	self->au.info.complete = 1;
 	self->au.info.error = 0;
@@ -997,6 +1007,7 @@ out:
 		self->au.prev_frame_num = self->au.frame_num;
 	self->au.first = 0;
 	self->au.idr = 0;
+	self->au.recovery_point = 0;
 	self->au.info.ref = 0;
 	memset(&self->prev_slice, 0, sizeof(self->prev_slice));
 	return 0;
@@ -1018,8 +1029,11 @@ vstrm_rtp_h264_rx_check_missing_frames(struct vstrm_rtp_h264_rx *self)
 {
 	uint32_t missing = 0;
 
+	/* If mode isn't intra refresh, we ignore IDR frames */
+	if (self->au.prev_frame_num > self->au.frame_num)
+		return;
+
 	/* Determine missing count (handle wrapping) */
-	/* TODO: handle reset to 0 for IDR frame */
 	missing = (self->au.frame_num - self->au.prev_frame_num - 1 +
 		   self->max_frame_num) %
 		  self->max_frame_num;
@@ -1170,6 +1184,13 @@ static int vstrm_rtp_h264_rx_handle_missing_slices(
 		if (self->info_v2.valid) {
 			self->slice = self->prev_slice;
 			self->slice.mb_count = self->info_v2.sei.slice_mb_count;
+		} else if (self->info_v4.valid) {
+			self->slice = self->prev_slice;
+			self->slice.mb_count =
+				(self->au.recovery_point)
+					? self->info_v4.sei
+						  .slice_mb_count_recovery_point
+					: self->info_v4.sei.slice_mb_count;
 		} else if (!self->pps.pps.entropy_coding_mode_flag) {
 			/* Reparse previous slice data to get number of
 			 * macroblocks */
@@ -1384,6 +1405,7 @@ static void vstrm_rtp_h264_rx_pps(struct vstrm_rtp_h264_rx *self)
 		/* Reset extra info found in SEI with geometry */
 		self->info_v1.valid = 0;
 		self->info_v2.valid = 0;
+		self->info_v4.valid = 0;
 		self->codec_info = codec_info;
 		(*self->cbs.codec_info_changed)(
 			self, &self->codec_info, self->cbs.userdata);
@@ -1451,15 +1473,6 @@ static int vstrm_rtp_h264_rx_nalu_complete(struct vstrm_rtp_h264_rx *self)
 		if (is_slice) {
 			self->slice.nalu_header = nh;
 			self->slice_copy = self->slice;
-			if (CHECK_FLAG(self->cfg.flags, H264_FAKE_FRAME_NUM) &&
-			    !is_idr) {
-				res = vstrm_rtp_h264_rx_regen_slice_header(
-					self,
-					self->nalu.buf,
-					&self->slice_copy);
-				if (res < 0)
-					goto out;
-			}
 		} else if (self->nalu.type == H264_NALU_TYPE_SPS) {
 			vstrm_rtp_h264_rx_sps(self);
 		} else if (self->nalu.type == H264_NALU_TYPE_PPS) {
@@ -1613,6 +1626,56 @@ out:
 }
 
 
+static inline int has_pack(struct vstrm_rtp_h264_rx *self, uint8_t pack_id)
+{
+	/* Never process packs >= 128 */
+	if (pack_id < 64)
+		return !!(self->metadata.pack_bf_low &
+			  (UINT64_C(1) << pack_id));
+	else if (pack_id < 128)
+		return !!(self->metadata.pack_bf_high &
+			  (UINT64_C(1) << (pack_id - 64)));
+	else
+		return 1;
+}
+
+
+static inline void set_pack(struct vstrm_rtp_h264_rx *self, uint8_t pack_id)
+{
+	/* Never set packs >= 128 */
+	if (pack_id < 64)
+		self->metadata.pack_bf_low |= (UINT64_C(1) << pack_id);
+	else if (pack_id < 128)
+		self->metadata.pack_bf_high |= (UINT64_C(1) << (pack_id - 64));
+}
+
+
+static inline int has_all_packs(struct vstrm_rtp_h264_rx *self,
+				uint8_t last_pack_id)
+{
+	/* We cannot have more than 128 packs */
+	if (last_pack_id >= 128)
+		return 0;
+
+	/* Only one bitfield to check */
+	if (last_pack_id < 64) {
+		uint64_t mask =
+			(last_pack_id == 63)
+				? UINT64_MAX
+				: ((UINT64_C(1) << (last_pack_id + 1)) - 1);
+		return (self->metadata.pack_bf_low & mask) == mask;
+	}
+
+	/* More than one, the low one must be full ones */
+	if (self->metadata.pack_bf_low != UINT64_MAX)
+		return 0;
+	uint64_t mask = (last_pack_id == 127)
+				? UINT64_MAX
+				: ((UINT64_C(1) << (last_pack_id - 63)) - 1);
+	return (self->metadata.pack_bf_high & mask) == mask;
+}
+
+
 static int vstrm_rtp_h264_rx_process_extheader(struct vstrm_rtp_h264_rx *self,
 					       uint16_t id,
 					       const uint8_t *extheaderbuf,
@@ -1620,35 +1683,68 @@ static int vstrm_rtp_h264_rx_process_extheader(struct vstrm_rtp_h264_rx *self,
 {
 	int res = 0;
 	struct vmeta_buffer buf;
-	vmeta_buffer_set_cdata(&buf, extheaderbuf, extheaderlen, 0);
+	const char *mime_type;
+
+	if (id == VSTRM_METADATA_PROTO_EXT_ID) {
+		if (extheaderlen < VSTRM_METADATA_PROTO_HEADER_LEN)
+			return -EPROTO;
+
+		uint16_t last_cur_pad;
+		memcpy(&last_cur_pad, &extheaderbuf[4], sizeof(last_cur_pad));
+		uint8_t last_pack, cur_pack, padding;
+		vstrm_rtp_h264_meta_header_unpack(
+			last_cur_pad, &last_pack, &cur_pack, &padding);
+		uint16_t offset;
+		memcpy(&offset, &extheaderbuf[6], sizeof(offset));
+		offset = ntohs(offset);
+
+		if (has_pack(self, cur_pack))
+			goto out;
+		set_pack(self, cur_pack);
+
+		size_t len = extheaderlen - padding -
+			     VSTRM_METADATA_PROTO_HEADER_LEN;
+
+		if (self->metadata.capacity < offset + len) {
+			uint8_t *tmp =
+				realloc(self->metadata.buf, offset + len);
+			if (!tmp) {
+				res = -ENOMEM;
+				ULOG_ERRNO("realloc", -res);
+				goto out;
+			}
+			self->metadata.buf = tmp;
+			self->metadata.capacity = offset + len;
+		}
+		memcpy(&self->metadata.buf[offset],
+		       extheaderbuf + VSTRM_METADATA_PROTO_HEADER_LEN,
+		       len);
+		if (cur_pack == last_pack)
+			self->metadata.len = offset + len;
+
+		if (!has_all_packs(self, last_pack))
+			goto out;
+
+		vmeta_buffer_set_cdata(
+			&buf, self->metadata.buf, self->metadata.len, 0);
+		mime_type = VMETA_FRAME_PROTO_MIME_TYPE;
+
+	} else {
+		vmeta_buffer_set_cdata(&buf, extheaderbuf, extheaderlen, 0);
+		mime_type = NULL;
+	}
 
 	/* Read metadata */
-	res = vmeta_frame_read(&buf, &self->au.metadata, NULL);
+	res = vmeta_frame_read(&buf, mime_type, &self->au.metadata);
 	if (res < 0) {
 		ULOG_ERRNO("vmeta_frame_read", -res);
 		goto out;
 	}
 
 	/* Remember RSSI from metadata */
-	switch (self->au.metadata.type) {
-	case VMETA_FRAME_TYPE_V1_STREAMING_EXTENDED:
-		self->video_stats.rssi =
-			self->au.metadata.v1_strm_basic.wifi_rssi;
-		break;
-	case VMETA_FRAME_TYPE_V1_STREAMING_BASIC:
-		self->video_stats.rssi =
-			self->au.metadata.v1_strm_ext.wifi_rssi;
-		break;
-	case VMETA_FRAME_TYPE_V2:
-		self->video_stats.rssi = self->au.metadata.v2.base.wifi_rssi;
-		break;
-	case VMETA_FRAME_TYPE_V3:
-		self->video_stats.rssi = self->au.metadata.v3.base.wifi_rssi;
-		break;
-	default:
-		self->video_stats.rssi = 0;
-		break;
-	}
+	(void)vmeta_frame_get_wifi_rssi(self->au.metadata,
+					&self->video_stats.rssi);
+	/* Ignore errors as the RSSI is not available on non-wifi links */
 
 out:
 	return res;
@@ -1662,6 +1758,7 @@ static const struct h264_ctx_cbs h264_cbs = {
 	.slice_data_mb = &vstrm_rtp_h264_rx_slice_data_mb_cb,
 	.sps = &vstrm_rtp_h264_rx_sps_cb,
 	.pps = &vstrm_rtp_h264_rx_pps_cb,
+	.sei_recovery_point = &vstrm_rtp_h264_rx_sei_recovery_point_cb,
 	.sei_user_data_unregistered =
 		&vstrm_rtp_h264_rx_sei_user_data_unregistered_cb,
 };
@@ -1690,10 +1787,12 @@ int vstrm_rtp_h264_rx_new(const struct vstrm_rtp_h264_rx_cfg *cfg,
 	self->cfg = *cfg;
 	self->cbs = *cbs;
 	self->codec_info.codec = VSTRM_CODEC_VIDEO_H264;
-	self->au.metadata.type = VMETA_FRAME_TYPE_NONE;
 	self->au.first = 1;
 	self->au.info.complete = 1;
 	self->nalu.first = 1;
+
+	self->metadata.buf = NULL;
+	self->metadata.capacity = 0;
 
 	/* Enable some flags via env. variable */
 	flag = getenv("VSTRM_RECEIVER_FLAGS_H264_FULL_MB_STATUS");
@@ -1744,11 +1843,14 @@ int vstrm_rtp_h264_rx_destroy(struct vstrm_rtp_h264_rx *self)
 	h264_reader_destroy(self->reader);
 	vstrm_video_stats_dyn_clear(&self->video_stats_dyn);
 	free(self->err_sec_start_time_by_zone);
+	if (self->au.metadata)
+		vmeta_frame_unref(self->au.metadata);
 	if (self->au.frame != NULL)
 		vstrm_frame_unref(self->au.frame->base);
 	free(self->au.info.mb_status);
 	if (self->nalu.buf != NULL)
 		pomp_buffer_unref(self->nalu.buf);
+	free(self->metadata.buf);
 	free(self->sps.buf);
 	free(self->pps.buf);
 	free(self);
@@ -1768,8 +1870,13 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
 	self->sps.valid = 0;
 	self->pps.valid = 0;
 
-	memset(&self->au.metadata, 0, sizeof(self->au.metadata));
-	self->au.metadata.type = VMETA_FRAME_TYPE_NONE;
+	if (self->au.metadata) {
+		vmeta_frame_unref(self->au.metadata);
+		self->au.metadata = NULL;
+	}
+	self->metadata.pack_bf_low = UINT64_C(0);
+	self->metadata.pack_bf_high = UINT64_C(0);
+	self->metadata.len = 0;
 
 	free(self->au.info.mb_status);
 	memset(&self->au.info, 0, sizeof(self->au.info));
@@ -1791,6 +1898,7 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
 
 	self->info_v1.valid = 0;
 	self->info_v2.valid = 0;
+	self->info_v4.valid = 0;
 
 	return 0;
 }
@@ -1992,40 +2100,5 @@ int vstrm_rtp_h264_rx_set_codec_info(struct vstrm_rtp_h264_rx *self,
 
 	vstrm_rtp_h264_rx_sps(self);
 	vstrm_rtp_h264_rx_pps(self);
-	return 0;
-}
-
-
-int vstrm_rtp_h264_rx_generate_grey_i_frame(struct vstrm_rtp_h264_rx *self,
-					    struct vstrm_frame **ret_frame)
-{
-	int res;
-	struct vstrm_rtp_h264_rx_frame *grey_i_frame = NULL;
-
-	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(ret_frame == NULL, EINVAL);
-
-	if (!self->sps.valid || !self->pps.valid) {
-		ULOGW("rtp_h264: SPS/PPS not available "
-		      "to generate grey IDR");
-		return -EAGAIN;
-	}
-
-	res = vstrm_rtp_h264_rx_gen_grey_i_frame(self, &grey_i_frame);
-	if (res < 0)
-		return res;
-
-	if (CHECK_FLAG(self->cfg.flags, H264_FAKE_FRAME_NUM)) {
-		/* Cancel any existing frame where frame_nums
-		 * have not been patched */
-		res = vstrm_rtp_h264_rx_au_cancel(self);
-		if (res < 0) {
-			vstrm_frame_unref(grey_i_frame->base);
-			return res;
-		}
-	}
-
-	*ret_frame = grey_i_frame->base;
-
 	return 0;
 }

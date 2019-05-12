@@ -31,9 +31,12 @@
 #include "vstrm_priv.h"
 
 /* clang-format off */
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define CHECK(_x) if ((res = (_x)) < 0) goto out
+#define CHECK(_x) do { if ((res = (_x)) < 0) goto out; } while (0)
 /* clang-format on */
+
+
+/* keep MAX_LEN % 4 == 0, this avoids padding */
+#define VSTRM_METADATA_FRAGMENT_MAX_LEN 300
 
 
 struct vstrm_rtp_h264_tx {
@@ -43,7 +46,150 @@ struct vstrm_rtp_h264_tx {
 
 	struct rtp_pkt *pkt;
 	size_t pos;
+
+	/* metadata informations */
+	struct {
+		uint8_t nb_packs;
+		uint8_t current_pack;
+	} metadata;
 };
+
+
+static int vstrm_rtp_h264_tx_add_legacy_metadata(struct vstrm_rtp_h264_tx *self)
+{
+	self->pkt->extheader.off = self->pos;
+	struct vmeta_buffer buf;
+	void *data = NULL;
+	size_t capacity = 0;
+	int res;
+
+	/* Only add legacy metadata in first packet */
+	if (!list_is_empty(self->packets))
+		return 0;
+
+	res = pomp_buffer_ensure_capacity(
+		self->pkt->raw.buf, RTP_PKT_HEADER_SIZE + VMETA_FRAME_MAX_SIZE);
+	if (res < 0) {
+		ULOG_ERRNO("pomp_buffer_ensure_capacity", -res);
+		goto out;
+	}
+	res = pomp_buffer_get_data(self->pkt->raw.buf, &data, NULL, &capacity);
+	if (res < 0) {
+		ULOG_ERRNO("pomp_buffer_get_data", -res);
+		goto out;
+	}
+	vmeta_buffer_set_data(&buf, data, capacity, self->pos);
+	res = vmeta_frame_write(&buf, self->frame->metadata);
+	if (res < 0) {
+		ULOG_ERRNO("vmeta_frame_write", -res);
+		goto out;
+	}
+	self->pos = buf.pos;
+	self->pkt->extheader.len = self->pos - self->pkt->extheader.off;
+
+	RTP_PKT_HEADER_FLAGS_SET(self->pkt->header.flags, EXTENSION, 1);
+
+	/* TODO: check overflow */
+out:
+	return res;
+}
+
+
+static int vstrm_rtp_h264_tx_add_proto_metadata(struct vstrm_rtp_h264_tx *self)
+{
+	self->pkt->extheader.off = self->pos;
+	void *data = NULL;
+	uint8_t *udata;
+	size_t capacity = 0;
+	int res;
+	uint16_t id, len, offset;
+	uint8_t padding;
+	size_t packlen;
+	off_t packoff;
+	uint16_t last_cur_pad;
+	const uint8_t *meta_content;
+	size_t meta_len;
+	res = vmeta_frame_proto_get_buffer(
+		self->frame->metadata, &meta_content, &meta_len);
+	if (res < 0) {
+		ULOG_ERRNO("vmeta_frame_proto_get_buffer", -res);
+		goto out_norelease;
+	}
+
+	if (list_is_empty(self->packets)) {
+		/* Split into VSTRM_METADATA_FRAGMENT_MAX_LEN byte packets */
+		self->metadata.nb_packs =
+			(meta_len + VSTRM_METADATA_FRAGMENT_MAX_LEN - 1) /
+			VSTRM_METADATA_FRAGMENT_MAX_LEN;
+		if (self->metadata.nb_packs > 128) {
+			res = -ENOBUFS;
+			goto out;
+		}
+		self->metadata.current_pack = 0;
+	}
+
+	/* Stop here if all metadata fragments were sent */
+	if (self->metadata.current_pack >= self->metadata.nb_packs) {
+		res = 0;
+		goto out;
+	}
+
+	packoff = self->metadata.current_pack * VSTRM_METADATA_FRAGMENT_MAX_LEN;
+	if (self->metadata.current_pack == (self->metadata.nb_packs - 1)) {
+		/* Last fragment */
+		packlen = meta_len - packoff;
+	} else {
+		/* Intermediate fragment, take MAX_LEN of data */
+		packlen = VSTRM_METADATA_FRAGMENT_MAX_LEN;
+	}
+
+	res = pomp_buffer_ensure_capacity(self->pkt->raw.buf,
+					  RTP_PKT_HEADER_SIZE + packlen + 8);
+	if (res < 0) {
+		ULOG_ERRNO("pomp_buffer_ensure_capacity", -res);
+		goto out;
+	}
+	res = pomp_buffer_get_data(self->pkt->raw.buf, &data, NULL, &capacity);
+	if (res < 0) {
+		ULOG_ERRNO("pomp_buffer_get_data", -res);
+		goto out;
+	}
+	udata = data;
+	/* Compute id + size + padding size */
+	id = htons(VSTRM_METADATA_PROTO_EXT_ID);
+	len = htons(((packlen + 3) / 4) + 1);
+	offset = htons(packoff);
+	padding = 4 - (packlen % 4);
+	if (padding == 4)
+		padding = 0;
+	last_cur_pad =
+		vstrm_rtp_h264_meta_header_pack(self->metadata.nb_packs - 1,
+						self->metadata.current_pack,
+						padding);
+	memcpy(&udata[self->pos], &id, sizeof(id));
+	self->pos += sizeof(id);
+	memcpy(&udata[self->pos], &len, sizeof(len));
+	self->pos += sizeof(len);
+	memcpy(&udata[self->pos], &last_cur_pad, sizeof(last_cur_pad));
+	self->pos += sizeof(last_cur_pad);
+	memcpy(&udata[self->pos], &offset, sizeof(offset));
+	self->pos += sizeof(offset);
+	memcpy(&udata[self->pos], meta_content + packoff, packlen);
+	self->pos += packlen;
+	if (padding > 0) {
+		memset(&udata[self->pos], 0, padding);
+		self->pos += padding;
+	}
+	self->pkt->extheader.len = self->pos - self->pkt->extheader.off;
+
+	RTP_PKT_HEADER_FLAGS_SET(self->pkt->header.flags, EXTENSION, 1);
+
+	self->metadata.current_pack++;
+out:
+	vmeta_frame_proto_release_buffer(self->frame->metadata, meta_content);
+out_norelease:
+	return res;
+}
 
 
 static int vstrm_rtp_h264_tx_begin_pkt(struct vstrm_rtp_h264_tx *self,
@@ -76,40 +222,17 @@ static int vstrm_rtp_h264_tx_begin_pkt(struct vstrm_rtp_h264_tx *self,
 	/* Skip RTP header */
 	self->pos = RTP_PKT_HEADER_SIZE;
 
-	/* If we have metadata, add in extended header for first packet */
-	/* TODO: add redundancy */
+	/* If we have metadata, add in extended header */
 	if ((self->cfg.flags & VSTRM_SENDER_FLAGS_ENABLE_RTP_HEADER_EXT) != 0 &&
-	    self->frame->metadata.type != VMETA_FRAME_TYPE_NONE &&
-	    list_is_empty(self->packets)) {
-		self->pkt->extheader.off = self->pos;
-		struct vmeta_buffer buf;
-		void *data = NULL;
-		size_t capacity = 0;
-		res = pomp_buffer_ensure_capacity(self->pkt->raw.buf,
-						  RTP_PKT_HEADER_SIZE +
-							  VMETA_FRAME_MAX_SIZE);
-		if (res < 0) {
-			ULOG_ERRNO("pomp_buffer_ensure_capacity", -res);
-			goto error;
-		}
-		res = pomp_buffer_get_data(
-			self->pkt->raw.buf, &data, NULL, &capacity);
-		if (res < 0) {
-			ULOG_ERRNO("pomp_buffer_get_data", -res);
-			goto error;
-		}
-		vmeta_buffer_set_data(&buf, data, capacity, self->pos);
-		res = vmeta_frame_write(&buf, &self->frame->metadata);
-		if (res < 0) {
-			ULOG_ERRNO("vmeta_frame_write", -res);
-			goto error;
-		}
-		self->pos = buf.pos;
-		self->pkt->extheader.len = self->pos - self->pkt->extheader.off;
+	    self->frame->metadata != NULL &&
+	    self->frame->metadata->type != VMETA_FRAME_TYPE_NONE) {
 
-		RTP_PKT_HEADER_FLAGS_SET(self->pkt->header.flags, EXTENSION, 1);
-
-		/* TODO: check overflow */
+		if (self->frame->metadata->type != VMETA_FRAME_TYPE_PROTO)
+			res = vstrm_rtp_h264_tx_add_legacy_metadata(self);
+		else
+			res = vstrm_rtp_h264_tx_add_proto_metadata(self);
+		if (res < 0)
+			goto error;
 	}
 
 	self->pkt->payload.off = self->pos;
@@ -297,7 +420,7 @@ int vstrm_rtp_h264_tx_process_frame(struct vstrm_rtp_h264_tx *self,
 	self->pkt = NULL;
 
 	/* Set market bit of last packet */
-	node = list_last(packets);
+	node = list_is_empty(packets) ? NULL : list_last(packets);
 	if (node != NULL) {
 		pkt = list_entry(node, struct rtp_pkt, node);
 		RTP_PKT_HEADER_FLAGS_SET(pkt->header.flags, MARKER, 1);

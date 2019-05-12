@@ -10,6 +10,7 @@ LOCAL_CFLAGS := -DVSTRM_API_EXPORTS -fvisibility=hidden -std=gnu99
 LOCAL_SRC_FILES := \
 	src/vstrm_clock_delta.c \
 	src/vstrm_dbg.c \
+	src/vstrm_event.c \
 	src/vstrm_frame.c \
 	src/vstrm_h264_sei_streaming.c \
 	src/vstrm_receiver.c \
@@ -23,6 +24,7 @@ LOCAL_LIBRARIES := \
 	libh264 \
 	libpomp \
 	librtp \
+	libtransport-packet \
 	libulog \
 	libvideo-metadata
 
@@ -41,12 +43,13 @@ LOCAL_CATEGORY_PATH := libs/streaming
 LOCAL_SRC_FILES := \
 	tests/vstrm_test.c \
 	tests/vstrm_test_receiver.c \
-	tests/vstrm_test_sender.c \
-	tests/vstrm_test_socket.c
+	tests/vstrm_test_sender.c
 LOCAL_LIBRARIES := \
 	libfutils \
 	libh264 \
 	libpomp \
+	libtransport-packet \
+	libtransport-socket \
 	libulog \
 	libvideo-streaming
 
