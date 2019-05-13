@@ -26,9 +26,73 @@
 
 #include "vstrm_test.h"
 
+#ifdef _WIN32
+#	include <winsock2.h>
+#	include <ws2tcpip.h>
+#	undef OPAQUE
+#else /* !_WIN32 */
+#	include <arpa/inet.h>
+#	include <netinet/in.h>
+#	include <netinet/ip.h>
+#	include <sys/socket.h>
+#endif /* !_WIN32 */
+
 #define ULOG_TAG vstrm_test_socket
 #include <ulog.h>
 ULOG_DECLARE_TAG(vstrm_test_socket);
+
+
+#ifdef _WIN32
+
+static inline ssize_t win32_recvfrom(int fd,
+				     void *buf,
+				     size_t len,
+				     int flags,
+				     struct sockaddr *addr,
+				     socklen_t *addrlen)
+{
+	return (ssize_t)recvfrom(
+		(SOCKET)fd, (char *)buf, (int)len, flags, addr, addrlen);
+}
+
+static inline ssize_t win32_sendto(int fd,
+				   const void *buf,
+				   size_t len,
+				   int flags,
+				   const struct sockaddr *addr,
+				   socklen_t addrlen)
+{
+	return (ssize_t)sendto(
+		(SOCKET)fd, (const char *)buf, (int)len, flags, addr, addrlen);
+}
+
+static inline int win32_setsockopt(int sockfd,
+				   int level,
+				   int optname,
+				   const void *optval,
+				   socklen_t optlen)
+{
+	return setsockopt(
+		(SOCKET)sockfd, level, optname, (const char *)optval, optlen);
+}
+
+#	undef errno
+#	undef recvfrom
+#	undef sendto
+#	undef setsockopt
+
+#	define errno ((int)WSAGetLastError())
+#	define recvfrom(_fd, _buf, _len, _flags, _addr, _addrlen)             \
+		win32_recvfrom(                                                \
+			(_fd), (_buf), (_len), (_flags), (_addr), (_addrlen))
+#	define sendto(_fd, _buf, _len, _flags, _addr, _addrlen)               \
+		win32_sendto(                                                  \
+			(_fd), (_buf), (_len), (_flags), (_addr), (_addrlen))
+#	define setsockopt(_sockfd, _level, _optname, _optval, _optlen)        \
+		win32_setsockopt(                                              \
+			(_sockfd), (_level), (_optname), (_optval), (_optlen))
+
+#endif /* _WIN32 */
 
 
 int vstrm_test_socket_setup(struct vstrm_test_socket *sock,
@@ -62,6 +126,7 @@ int vstrm_test_socket_setup(struct vstrm_test_socket *sock,
 		goto error;
 	}
 
+#ifndef _WIN32
 	/* Setup flags */
 	res = fd_set_close_on_exec(sock->fd);
 	if (res < 0) {
@@ -73,12 +138,14 @@ int vstrm_test_socket_setup(struct vstrm_test_socket *sock,
 		ULOG_ERRNO("fd_add_flags(%d)", -res, sock->fd);
 		goto error;
 	}
+#endif /* !_WIN32 */
 
 	/* Setup local and remote addresses */
 	memset(&sock->local_addr, 0, sizeof(sock->local_addr));
 	sock->local_addr.sin_family = AF_INET;
 	res = inet_pton(AF_INET, local_addr, &sock->local_addr.sin_addr);
 	if (res <= 0) {
+		res = -errno;
 		ULOG_ERRNO("inet_pton", -res);
 		goto error;
 	}
@@ -87,6 +154,7 @@ int vstrm_test_socket_setup(struct vstrm_test_socket *sock,
 	sock->remote_addr.sin_family = AF_INET;
 	res = inet_pton(AF_INET, remote_addr, &sock->remote_addr.sin_addr);
 	if (res <= 0) {
+		res = -errno;
 		ULOG_ERRNO("inet_pton", -res);
 		goto error;
 	}
@@ -264,8 +332,12 @@ ssize_t vstrm_test_socket_read(struct vstrm_test_socket *sock)
 
 	if (readlen < 0) {
 		readlen = -errno;
-		if (errno != EAGAIN)
-			ULOG_ERRNO("recvfrom(%d)", errno, sock->fd);
+#ifdef _WIN32
+		if (readlen == -WSAEWOULDBLOCK)
+			readlen = -EAGAIN;
+#endif /* _WIN32 */
+		if (readlen != -EAGAIN)
+			ULOG_ERRNO("recvfrom(%d)", (int)-readlen, sock->fd);
 	}
 
 	if ((readlen >= 0) && (sock->remote_addr.sin_port == 0)) {
@@ -330,8 +402,12 @@ ssize_t vstrm_test_socket_write(struct vstrm_test_socket *sock,
 		}
 	} else {
 		writelen = -errno;
-		if (errno != EAGAIN)
-			ULOG_ERRNO("sendto(%d)", errno, sock->fd);
+#ifdef _WIN32
+		if (writelen == -WSAEWOULDBLOCK)
+			writelen = -EAGAIN;
+#endif /* _WIN32 */
+		if (writelen != -EAGAIN)
+			ULOG_ERRNO("sendto(%d)", (int)-writelen, sock->fd);
 	}
 
 	return writelen;

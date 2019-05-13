@@ -53,6 +53,15 @@ static const struct option long_options[] = {
 };
 
 
+/* Win32 stubs */
+#ifdef _WIN32
+static inline const char *strsignal(int signum)
+{
+	return "??";
+}
+#endif /* _WIN32 */
+
+
 static void sig_handler(int signum)
 {
 	ULOGI("signal %d(%s) received", signum, strsignal(signum));
@@ -205,7 +214,9 @@ int main(int argc, char **argv)
 	/* Setup signal handlers */
 	signal(SIGINT, &sig_handler);
 	signal(SIGTERM, &sig_handler);
+#ifndef _WIN32
 	signal(SIGPIPE, SIG_IGN);
+#endif
 
 	/* Loop */
 	self->loop = pomp_loop_new();

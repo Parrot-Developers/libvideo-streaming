@@ -39,6 +39,106 @@ ULOG_DECLARE_TAG(vstrm_test_sender);
 #define MAX_NETWORK_LATENCY_CLASS_3 100
 
 
+static void unmap_file(struct vstrm_test_sender *self)
+{
+#ifdef _WIN32
+	if (self->data != NULL)
+		UnmapViewOfFile(self->data);
+	self->data = NULL;
+	if (self->map != INVALID_HANDLE_VALUE)
+		CloseHandle(self->map);
+	self->map = INVALID_HANDLE_VALUE;
+	if (self->infile != INVALID_HANDLE_VALUE)
+		CloseHandle(self->infile);
+	self->infile = INVALID_HANDLE_VALUE;
+#else
+	if (self->fd >= 0) {
+		if (self->data != NULL)
+			munmap(self->data, self->data_len);
+		self->data = NULL;
+		close(self->fd);
+		self->fd = -1;
+	}
+#endif
+}
+
+
+static int map_file(struct vstrm_test_sender *self)
+{
+	int res;
+
+#ifdef _WIN32
+	LARGE_INTEGER filesize;
+
+	self->infile = CreateFileA(self->input_file,
+				   GENERIC_READ,
+				   0,
+				   NULL,
+				   OPEN_EXISTING,
+				   FILE_ATTRIBUTE_NORMAL,
+				   NULL);
+	if (self->infile == INVALID_HANDLE_VALUE) {
+		res = -EIO;
+		ULOG_ERRNO("CreateFileA('%s')", -res, self->input_file);
+		goto error;
+	}
+
+	self->map = CreateFileMapping(
+		self->infile, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (self->map == INVALID_HANDLE_VALUE) {
+		res = -EIO;
+		ULOG_ERRNO("CreateFileMapping('%s')", -res, self->input_file);
+		goto error;
+	}
+
+	res = GetFileSizeEx(self->infile, &filesize);
+	if (res == 0) {
+		res = -EIO;
+		ULOG_ERRNO("GetFileSizeEx('%s')", -res, self->input_file);
+		goto error;
+	}
+	self->data_len = filesize.QuadPart;
+
+	self->data = MapViewOfFile(self->map, FILE_MAP_READ, 0, 0, 0);
+	if (self->data == NULL) {
+		res = -EIO;
+		ULOG_ERRNO("MapViewOfFile('%s')", -res, self->input_file);
+		goto error;
+	}
+#else
+	/* Try to open input file */
+	self->fd = open(self->input_file, O_RDONLY);
+	if (self->fd < 0) {
+		res = -errno;
+		ULOG_ERRNO("open('%s')", -res, self->input_file);
+		goto error;
+	}
+
+	/* Get size and map it */
+	self->data_len = lseek(self->fd, 0, SEEK_END);
+	if (self->data_len == (size_t)-1) {
+		res = -errno;
+		ULOG_ERRNO("lseek", -res);
+		goto error;
+	}
+
+	self->data =
+		mmap(NULL, self->data_len, PROT_READ, MAP_PRIVATE, self->fd, 0);
+	if (self->data == MAP_FAILED) {
+		res = -errno;
+		ULOG_ERRNO("mmap", -res);
+		goto error;
+	}
+#endif
+
+	return 0;
+
+error:
+	unmap_file(self);
+	return res;
+}
+
+
 static void frame_dispose(struct vstrm_frame *frame)
 {
 	return;
@@ -194,88 +294,24 @@ static uint32_t get_socket_data_tx_size(uint32_t max_bitrate,
 }
 
 
-static void slice_cb(struct h264_ctx *ctx,
-		     const uint8_t *buf,
-		     size_t len,
-		     const struct h264_slice_header *sh,
-		     void *userdata)
+static void au_end_cb(struct h264_ctx *ctx, void *userdata)
 {
 	int res;
 	struct vstrm_test_sender *self = userdata;
-	struct h264_nalu_header nh;
-	struct h264_slice_header *prev_sh = &self->prev_slice_header;
-	struct h264_nalu_header *prev_nh = &self->prev_slice_nalu_header;
 
 	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_IF(buf == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_IF(sh == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_IF(ctx == NULL, EINVAL);
 
-	memset(&nh, 0, sizeof(nh));
-	self->first_vcl_nalu = 0;
-	if (prev_sh->slice_type == (unsigned)H264_SLICE_TYPE_UNKNOWN)
-		goto out;
-
-	res = h264_parse_nalu_header(buf, len, &nh);
-	if (res < 0) {
-		ULOG_ERRNO("h264_parse_nalu_header", -res);
-		goto out;
+	if (self->frame != NULL) {
+		res = vstrm_sender_send_frame(self->sender, self->frame);
+		if (res < 0)
+			ULOG_ERRNO("vstrm_sender_send_frame", -res);
+		vstrm_frame_unref(self->frame);
+		self->frame = NULL;
+		res = h264_reader_stop(self->reader);
+		if (res < 0)
+			ULOG_ERRNO("h264_reader_stop", -res);
 	}
-
-	/* Detection of the first VCL NAL unit of a primary coded picture
-	 * see rec. ITU-T H.264 chap. 7.4.1.2.4 */
-	if ((sh->pic_parameter_set_id != prev_sh->pic_parameter_set_id) ||
-	    (sh->field_pic_flag != prev_sh->field_pic_flag) ||
-	    (nh.nal_ref_idc != prev_nh->nal_ref_idc)) {
-		self->first_vcl_nalu = 1;
-		goto out;
-	}
-	if (((nh.nal_unit_type == H264_NALU_TYPE_SLICE_IDR) ||
-	     (prev_nh->nal_unit_type == H264_NALU_TYPE_SLICE_IDR)) &&
-	    ((nh.nal_unit_type != prev_nh->nal_unit_type) ||
-	     (sh->idr_pic_id != prev_sh->idr_pic_id))) {
-		self->first_vcl_nalu = 1;
-		goto out;
-	}
-	if ((self->sps_pic_order_cnt_type == 0) &&
-	    ((sh->pic_order_cnt_lsb != prev_sh->pic_order_cnt_lsb) ||
-	     (sh->delta_pic_order_cnt_bottom !=
-	      prev_sh->delta_pic_order_cnt_bottom))) {
-		self->first_vcl_nalu = 1;
-		goto out;
-	}
-	if ((self->sps_pic_order_cnt_type == 1) &&
-	    ((sh->delta_pic_order_cnt[0] != prev_sh->delta_pic_order_cnt[0]) ||
-	     (sh->delta_pic_order_cnt[1] != prev_sh->delta_pic_order_cnt[1]))) {
-		self->first_vcl_nalu = 1;
-		goto out;
-	}
-	if ((!self->sps_frame_mbs_only_flag) && (sh->field_pic_flag) &&
-	    (self->prev_slice_header.field_pic_flag) &&
-	    (sh->bottom_field_flag !=
-	     self->prev_slice_header.bottom_field_flag)) {
-		self->first_vcl_nalu = 1;
-		goto out;
-	}
-
-out:
-	self->prev_slice_nalu_header = nh;
-	self->prev_slice_header = *sh;
-}
-
-
-static void sps_cb(struct h264_ctx *ctx,
-		   const uint8_t *buf,
-		   size_t len,
-		   const struct h264_sps *sps,
-		   void *userdata)
-{
-	struct vstrm_test_sender *self = userdata;
-
-	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_IF(sps == NULL, EINVAL);
-
-	self->sps_frame_mbs_only_flag = sps->frame_mbs_only_flag;
-	self->sps_pic_order_cnt_type = sps->pic_order_cnt_type;
 }
 
 
@@ -291,31 +327,6 @@ static void nalu_end_cb(struct h264_ctx *ctx,
 
 	ULOG_ERRNO_RETURN_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_IF(buf == NULL, EINVAL);
-
-	/* Access unit change detection
-	 * see rec. ITU-T H.264 chap. 7.4.1.2.4 */
-	if ((self->frame != NULL) &&
-	    (self->prev_slice_header.slice_type !=
-	     (unsigned)H264_SLICE_TYPE_UNKNOWN) &&
-	    ((type == H264_NALU_TYPE_AUD) || (type == H264_NALU_TYPE_SPS) ||
-	     (type == H264_NALU_TYPE_PPS) || (type == H264_NALU_TYPE_SEI) ||
-	     (((unsigned)type >= 14) && ((unsigned)type <= 18)) ||
-	     (self->first_vcl_nalu))) {
-		res = vstrm_sender_send_frame(self->sender, self->frame);
-		if (res < 0)
-			ULOG_ERRNO("vstrm_sender_send_frame", -res);
-		vstrm_frame_unref(self->frame);
-		self->frame = NULL;
-		res = h264_reader_stop(self->reader);
-		if (res < 0)
-			ULOG_ERRNO("h264_reader_stop", -res);
-	}
-
-	if ((type != H264_NALU_TYPE_SLICE) &&
-	    (type != H264_NALU_TYPE_SLICE_IDR)) {
-		self->prev_slice_header.slice_type =
-			(unsigned)H264_SLICE_TYPE_UNKNOWN;
-	}
 
 	/* Save the SPS and PPS */
 	if ((type == H264_NALU_TYPE_SPS) && (self->sps == NULL)) {
@@ -459,9 +470,8 @@ static void *vstrm_test_sender_thread(void *ptr)
 
 
 static const struct h264_ctx_cbs h264_cbs = {
+	.au_end = &au_end_cb,
 	.nalu_end = &nalu_end_cb,
-	.slice = &slice_cb,
-	.sps = &sps_cb,
 };
 
 
@@ -505,8 +515,15 @@ int vstrm_test_sender_create(const char *file,
 		ULOG_ERRNO("calloc", ENOMEM);
 		return -ENOMEM;
 	}
+#ifdef _WIN32
+	self->infile = INVALID_HANDLE_VALUE;
+	self->map = INVALID_HANDLE_VALUE;
+#else
+	self->fd = -1;
+#endif
 	self->finished_cb = finished_cb;
 	self->userdata = userdata;
+	self->input_file = file;
 
 	/* Loop */
 	self->loop = pomp_loop_new();
@@ -516,26 +533,10 @@ int vstrm_test_sender_create(const char *file,
 		goto out;
 	}
 
-	/* Input file */
-	self->fd = open(file, O_RDONLY);
-	if (self->fd < 0) {
-		ULOG_ERRNO("open", errno);
-		res = -errno;
+	/* Map the input file */
+	res = map_file(self);
+	if (res < 0)
 		goto out;
-	}
-	self->data_len = lseek(self->fd, 0, SEEK_END);
-	if (self->data_len == (size_t)-1) {
-		ULOG_ERRNO("lseek", errno);
-		res = -errno;
-		goto out;
-	}
-	self->data =
-		mmap(NULL, self->data_len, PROT_READ, MAP_PRIVATE, self->fd, 0);
-	if (self->data == MAP_FAILED) {
-		ULOG_ERRNO("mmap", errno);
-		res = -errno;
-		goto out;
-	}
 
 	self->framerate = framerate;
 	self->frame_interval_us =
@@ -705,10 +706,7 @@ int vstrm_test_sender_destroy(struct vstrm_test_sender *self)
 		if (res < 0)
 			ULOG_ERRNO("h264_reader_destroy", -res);
 	}
-	if (self->fd >= 0) {
-		munmap(self->data, self->data_len);
-		close(self->fd);
-	}
+	unmap_file(self);
 	if (self->timer != NULL) {
 		res = pomp_timer_destroy(self->timer);
 		if (res < 0)

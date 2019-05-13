@@ -48,8 +48,10 @@ LOCAL_LIBRARIES := \
 	libh264 \
 	libpomp \
 	libulog \
-	libvideo-buffers \
-	libvideo-buffers-generic \
 	libvideo-streaming
+
+ifeq ("$(TARGET_OS)","windows")
+  LOCAL_LDLIBS += -lws2_32
+endif
 
 include $(BUILD_EXECUTABLE)

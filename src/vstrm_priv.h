@@ -47,6 +47,7 @@
 
 #include <futils/list.h>
 #include <futils/random.h>
+#include <futils/systimetools.h>
 #include <futils/timetools.h>
 #include <h264/h264.h>
 #include <libpomp.h>

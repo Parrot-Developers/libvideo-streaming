@@ -35,12 +35,13 @@ FILE *vstrm_dbg_create_file(const char *dir,
 			    const char *mode)
 {
 	FILE *file = NULL;
-	char path[260] = "";
-	time_t t;
+	uint64_t epoch_sec = 0;
+	int32_t utc_offset_sec = 0;
 	struct tm tm;
+	char path[260] = "";
 
-	t = time(NULL);
-	localtime_r(&t, &tm);
+	time_local_get(&epoch_sec, &utc_offset_sec);
+	time_local_to_tm(epoch_sec, utc_offset_sec, &tm);
 
 	snprintf(path,
 		 sizeof(path),

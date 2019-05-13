@@ -28,7 +28,6 @@
 #ifndef _VSTRM_TEST_H_
 #define _VSTRM_TEST_H_
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -38,8 +37,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
+
+#ifdef _WIN32
+#	include <winsock2.h>
+#	include <windows.h>
+#else /* !_WIN32 */
+#	include <arpa/inet.h>
+#	include <sys/mman.h>
+#endif /* !_WIN32 */
 
 #include <futils/futils.h>
 #include <h264/h264.h>
@@ -75,7 +81,13 @@ struct vstrm_test_sender {
 	int thread_should_stop;
 	struct pomp_loop *loop;
 	struct pomp_timer *timer;
+	const char *input_file;
+#ifdef _WIN32
+	HANDLE infile;
+	HANDLE map;
+#else
 	int fd;
+#endif
 	void *data;
 	size_t data_len;
 	size_t data_off;
@@ -85,11 +97,6 @@ struct vstrm_test_sender {
 	uint8_t *pps;
 	size_t pps_len;
 	struct h264_reader *reader;
-	int sps_frame_mbs_only_flag;
-	uint32_t sps_pic_order_cnt_type;
-	struct h264_nalu_header prev_slice_nalu_header;
-	struct h264_slice_header prev_slice_header;
-	int first_vcl_nalu;
 	struct vstrm_sender *sender;
 	struct vstrm_test_socket data_sock;
 	struct vstrm_test_socket ctrl_sock;
