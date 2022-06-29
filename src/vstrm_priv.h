@@ -69,8 +69,6 @@ struct vstrm_timestamp;
 
 #define VSTRM_USECS_PER_SEC 1000000
 
-#define VSTRM_METADATA_PROTO_EXT_ID 0x5062 /* "Pb" */
-
 #define VSTRM_METADATA_PROTO_HEADER_LEN 8
 
 

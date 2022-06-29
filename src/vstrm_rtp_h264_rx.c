@@ -936,8 +936,7 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 	if (self->prev_slice.valid &&
 	    !CHECK_FLAG(self->cfg.flags, H264_FULL_MB_STATUS)) {
 		uint32_t mb_start =
-			self->prev_slice.slice_header.first_mb_in_slice +
-			self->prev_slice.mb_count;
+			self->prev_slice.slice_header.first_mb_in_slice;
 		uint32_t mb_end = self->au.info.mb_total;
 		if (mb_start >= mb_end) {
 			/* Mismatch in macroblock ordering */
@@ -1685,7 +1684,7 @@ static int vstrm_rtp_h264_rx_process_extheader(struct vstrm_rtp_h264_rx *self,
 	struct vmeta_buffer buf;
 	const char *mime_type;
 
-	if (id == VSTRM_METADATA_PROTO_EXT_ID) {
+	if (id == VMETA_FRAME_PROTO_RTP_EXT_ID) {
 		if (extheaderlen < VSTRM_METADATA_PROTO_HEADER_LEN)
 			return -EPROTO;
 
@@ -1735,9 +1734,18 @@ static int vstrm_rtp_h264_rx_process_extheader(struct vstrm_rtp_h264_rx *self,
 	}
 
 	/* Read metadata */
-	res = vmeta_frame_read(&buf, mime_type, &self->au.metadata);
+	if (self->au.metadata) {
+		vmeta_frame_unref(self->au.metadata);
+		self->au.metadata = NULL;
+	}
+	res = vmeta_frame_read2(
+		&buf,
+		mime_type,
+		!(CHECK_FLAG(self->cfg.flags,
+			     DISABLE_VIDEO_METADATA_CONVERSION)),
+		&self->au.metadata);
 	if (res < 0) {
-		ULOG_ERRNO("vmeta_frame_read", -res);
+		ULOG_ERRNO("vmeta_frame_read2", -res);
 		goto out;
 	}
 

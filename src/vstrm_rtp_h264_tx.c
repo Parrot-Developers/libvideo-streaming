@@ -156,7 +156,7 @@ static int vstrm_rtp_h264_tx_add_proto_metadata(struct vstrm_rtp_h264_tx *self)
 	}
 	udata = data;
 	/* Compute id + size + padding size */
-	id = htons(VSTRM_METADATA_PROTO_EXT_ID);
+	id = htons(VMETA_FRAME_PROTO_RTP_EXT_ID);
 	len = htons(((packlen + 3) / 4) + 1);
 	offset = htons(packoff);
 	padding = 4 - (packlen % 4);

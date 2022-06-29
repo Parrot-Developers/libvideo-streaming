@@ -50,6 +50,9 @@ struct vstrm_receiver;
  * the decoding (for intra-refresh streams) */
 #define VSTRM_RECEIVER_FLAGS_H264_GEN_GREY_IDR_FRAME (1 << 5)
 
+/* Disable automatic video metadata conversion to protobuf-based format */
+#define VSTRM_RECEIVER_FLAGS_DISABLE_VIDEO_METADATA_CONVERSION (1 << 6)
+
 /* Compute full macroblock status by parsing all macroblocks instead of just
  * looking at the slice type (to detect refresh patterns in P-slices).
  * This can generate high CPU load so it should be used mainly for tests.
