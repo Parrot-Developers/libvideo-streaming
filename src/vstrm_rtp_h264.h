@@ -73,6 +73,7 @@ struct vstrm_rtp_h264_rx_cbs {
 
 struct vstrm_rtp_h264_tx_cfg_dyn {
 	uint32_t target_packet_size;
+	uint32_t packet_size_align;
 };
 
 

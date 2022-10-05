@@ -277,7 +277,7 @@ static int vstrm_sender_write_rtcp_sender_report(struct vstrm_sender *self,
 
 	/* Count of packets/bytes sent */
 	sr.sender_packet_count = self->stats.total_packet_count;
-	sr.sender_byte_count = self->stats.total_byte_count;
+	sr.sender_byte_count = self->stats.total_payload_byte_count;
 
 	/* Write in packet */
 	res = rtcp_pkt_write_sender_report(buf, pos, &sr);
@@ -465,7 +465,7 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 	uint64_t cur_timestamp = 0;
 	struct pomp_buffer *buf = NULL;
 	struct tpkt_packet *pkt = NULL;
-	size_t pos = 0;
+	size_t pos = 0, len = 0;
 	int full_sdes;
 
 	/* Nothing to do if we did not send at least one RTP packet */
@@ -488,7 +488,8 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 		goto out;
 
 	/* Write SDES */
-	full_sdes = (cur_timestamp >=
+	full_sdes = (self->full_sdes_send_ts == 0) ||
+		    (cur_timestamp >=
 		     self->full_sdes_send_ts + RTCP_FULL_SDES_PERIOD_US);
 	res = vstrm_sender_write_rtcp_sdes(
 		self, buf, &pos, full_sdes, cur_timestamp);
@@ -531,6 +532,11 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 	res = (*self->cbs.send_ctrl)(self, pkt, self->cbs_userdata);
 	if (res < 0 && res != -EAGAIN)
 		ULOG_ERRNO("cbs.send_ctrl", -res);
+	else if (res == 0) {
+		tpkt_get_cdata(pkt, NULL, &len, NULL);
+		self->stats.total_control_sent_packet_count++;
+		self->stats.total_control_sent_byte_count += len;
+	}
 
 out:
 	tpkt_unref(pkt);
@@ -597,7 +603,17 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 							 rtp_pkt->raw.buf);
 			}
 			self->stats.total_packet_count++;
-			self->stats.total_byte_count += rtp_pkt->payload.len;
+			self->stats.total_byte_count +=
+				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
+				rtp_pkt->payload.len + rtp_pkt->padding.len;
+			self->stats.total_header_byte_count +=
+				RTP_PKT_HEADER_SIZE;
+			self->stats.total_headerext_byte_count +=
+				rtp_pkt->extheader.len;
+			self->stats.total_payload_byte_count +=
+				rtp_pkt->payload.len;
+			self->stats.total_padding_byte_count +=
+				rtp_pkt->padding.len;
 			list_del(&rtp_pkt->node);
 			rtp_pkt_destroy(rtp_pkt);
 		} else {
@@ -623,9 +639,21 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 			      rtp_pkt->importance,
 			      (unsigned int)(delta / 1000));
 			self->stats.total_packet_count++;
-			self->stats.total_byte_count += rtp_pkt->payload.len;
+			self->stats.total_byte_count +=
+				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
+				rtp_pkt->payload.len + rtp_pkt->padding.len;
+			self->stats.total_header_byte_count +=
+				RTP_PKT_HEADER_SIZE;
+			self->stats.total_headerext_byte_count +=
+				rtp_pkt->extheader.len;
+			self->stats.total_payload_byte_count +=
+				rtp_pkt->payload.len;
+			self->stats.total_padding_byte_count +=
+				rtp_pkt->padding.len;
 			self->stats.dropped_packet_count++;
-			self->stats.dropped_byte_count += rtp_pkt->payload.len;
+			self->stats.dropped_byte_count +=
+				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
+				rtp_pkt->payload.len + rtp_pkt->padding.len;
 			list_del(&rtp_pkt->node);
 			rtp_pkt_destroy(rtp_pkt);
 		}
@@ -956,6 +984,7 @@ int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt)
 	int res = 0;
 	struct vmeta_session old_session_metadata_peer;
 	struct pomp_buffer *buf;
+	size_t len = 0;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
@@ -964,6 +993,9 @@ int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt)
 	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
 
 	self->rtcp_recv_ts = tpkt_get_timestamp(pkt);
+	tpkt_get_cdata(pkt, NULL, &len, NULL);
+	self->stats.total_control_received_packet_count++;
+	self->stats.total_control_received_byte_count += len;
 
 	/* Remember session metadata before parsing new one found in this
 	 * RTCP packet */
@@ -1022,6 +1054,7 @@ int vstrm_sender_set_cfg_dyn(struct vstrm_sender *self,
 	if (self->rtp_h264 != NULL) {
 		rtp_h264_cfg_dyn.target_packet_size =
 			cfg_dyn->target_packet_size;
+		rtp_h264_cfg_dyn.packet_size_align = cfg_dyn->packet_size_align;
 		res = vstrm_rtp_h264_tx_set_cfg_dyn(self->rtp_h264,
 						    &rtp_h264_cfg_dyn);
 	}
@@ -1091,7 +1124,11 @@ int vstrm_sender_set_session_metadata_self(struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(meta == NULL, EINVAL);
 
+	if (memcmp(meta, self->session_metadata_self, sizeof(*meta)) == 0)
+		return 0;
+
 	*self->session_metadata_self = *meta;
+	self->full_sdes_send_ts = 0;
 	return 0;
 }
 

@@ -54,6 +54,10 @@ struct vstrm_sender_cfg_dyn {
 	/* Target network packet size in bytes */
 	uint32_t target_packet_size;
 
+	/* Network packet size alignment in bytes, using padding;
+	 * 0 means no alignment */
+	uint32_t packet_size_align;
+
 	/* Maximum acceptable total latency in ms for each importance level
 	 * (no drop if 0); the total latency is the difference between the
 	 * frame capture TS and the output time on the network */
@@ -168,17 +172,41 @@ struct vstrm_sender_cbs {
 
 /* Sender statistics */
 struct vstrm_sender_stats {
-	/* Overall total packet count */
+	/* Overall total packet count (RTP) */
 	uint32_t total_packet_count;
 
-	/* Overall total byte count */
+	/* Overall total byte count (RTP header + ext + payload + padding) */
 	uint32_t total_byte_count;
+
+	/* Overall total header byte count (RTP) */
+	uint32_t total_header_byte_count;
+
+	/* Overall total header extensions byte count */
+	uint32_t total_headerext_byte_count;
+
+	/* Overall total payload byte count */
+	uint32_t total_payload_byte_count;
+
+	/* Overall total padding byte count */
+	uint32_t total_padding_byte_count;
 
 	/* Overall dropped packet count */
 	uint32_t dropped_packet_count;
 
 	/* Overall dropped byte count */
 	uint32_t dropped_byte_count;
+
+	/* Overall total sent control packet count (RTCP) */
+	uint32_t total_control_sent_packet_count;
+
+	/* Overall total sent control byte count (RTCP including header) */
+	uint32_t total_control_sent_byte_count;
+
+	/* Overall total received control packet count (RTCP) */
+	uint32_t total_control_received_packet_count;
+
+	/* Overall total received control byte count (RTCP including header) */
+	uint32_t total_control_received_byte_count;
 };
 
 

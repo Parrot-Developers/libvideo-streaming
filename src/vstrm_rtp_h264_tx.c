@@ -250,9 +250,33 @@ error:
 
 static void vstrm_rtp_h264_tx_end_pkt(struct vstrm_rtp_h264_tx *self)
 {
+	int res;
+
 	/* Setup final payload length */
 	self->pkt->payload.len = self->pos - self->pkt->payload.off;
 
+	/* Add optional padding */
+	if ((self->cfg.dyn.packet_size_align) &&
+	    (self->pkt->payload.len % self->cfg.dyn.packet_size_align)) {
+		uint8_t pad_len = self->pkt->payload.len %
+				  self->cfg.dyn.packet_size_align;
+		uint8_t zero = 0;
+
+		self->pkt->padding.off =
+			self->pkt->payload.off + self->pkt->payload.len;
+
+		for (uint8_t i = 0; i < pad_len - 1; i++) {
+			CHECK(pomp_buffer_write(
+				self->pkt->raw.buf, &self->pos, &zero, 1));
+		}
+		CHECK(pomp_buffer_write(
+			self->pkt->raw.buf, &self->pos, &pad_len, 1));
+
+		self->pkt->padding.len = pad_len;
+		RTP_PKT_HEADER_FLAGS_SET(self->pkt->header.flags, PADDING, 1);
+	}
+
+out:
 	/* Setup data/len of buffer */
 	pomp_buffer_get_cdata(self->pkt->raw.buf,
 			      (const void **)&self->pkt->raw.cdata,
