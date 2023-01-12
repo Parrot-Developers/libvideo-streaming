@@ -100,10 +100,12 @@ struct vstrm_sender_cbs {
 	 * unreferenced by the callback function.
 	 * @param stream: sender instance pointer
 	 * @param pkt: pointer to the packet to send
+	 * @param marker: RTP header marker bit
 	 * @param userdata: user data pointer
 	 * @return 0 on success, negative errno value in case of error */
 	int (*send_data)(struct vstrm_sender *stream,
 			 struct tpkt_packet *pkt,
+			 bool marker,
 			 void *userdata);
 
 	/* Called when a control (RTCP) packet needs to be sent.
@@ -136,6 +138,8 @@ struct vstrm_sender_cbs {
 					      void *userdata);
 
 	/* Called when a RTCP receiver report been received from the receiver.
+	 * Note: the interarrival jitter is output in microseconds instead of
+	 * units of the RTP clock rate.
 	 * @param stream: sender instance pointer
 	 * @param rr: pointer to the received receiver report structure
 	 * @param rtd: round-trip delay in microseconds if known,
@@ -421,6 +425,22 @@ int vstrm_sender_get_session_metadata_self(struct vstrm_sender *self,
 VSTRM_API
 int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
 					   const struct vmeta_session **meta);
+
+
+/**
+ * Get the sender to receiver clock delta value in microseconds.
+ * The value is provided through the delta parameter; the precision of the clock
+ * delta in microseconds is provided through the optional precision parameter.
+ * If the clock delta value is not available, -EAGAIN is returned.
+ * @param self: sender instance handle
+ * @param delta: pointer to the clock delta (output)
+ * @param precision: optional pointer to the clock delta precision (output)
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_sender_get_clock_delta(struct vstrm_sender *self,
+				 int64_t *delta,
+				 uint32_t *precision);
 
 
 #endif /* !_VSTRM_SENDER_H_ */

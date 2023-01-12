@@ -27,7 +27,6 @@
 #ifndef _VSTRM_PRIV_H_
 #define _VSTRM_PRIV_H_
 
-#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>

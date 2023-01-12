@@ -458,6 +458,7 @@ static int vstrm_receiver_write_rtcp_video_stats(struct vstrm_receiver *self,
 	/* Write to CSV file */
 	if (!self->dbg.video_stats_csv_header) {
 		vstrm_video_stats_csv_header(self->dbg.video_stats_csv,
+					     video_stats->version,
 					     video_stats->mb_status_class_count,
 					     video_stats->mb_status_zone_count);
 		self->dbg.video_stats_csv_header = 1;
@@ -1201,4 +1202,33 @@ int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
 
 	*meta = &self->source.session_metadata_peer;
 	return 0;
+}
+
+
+int vstrm_receiver_get_clock_delta(struct vstrm_receiver *self,
+				   int64_t *delta,
+				   uint32_t *precision)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(delta == NULL, EINVAL);
+
+	if (self->source.clock_delta_ctx.clock_delta_valid == 0)
+		return -EAGAIN;
+
+	*delta = self->source.clock_delta_ctx.clock_delta_avg;
+	if (precision) {
+		*precision = (uint32_t)(
+			self->source.clock_delta_ctx.rt_delay_min_avg / 2);
+	}
+	return 0;
+}
+
+
+int vstrm_receiver_set_video_stats(struct vstrm_receiver *self,
+				   const struct vstrm_video_stats *stats)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(stats == NULL, EINVAL);
+
+	return vstrm_rtp_h264_rx_set_video_stats(self->rtp_h264, stats);
 }

@@ -41,6 +41,7 @@ int vstrm_video_stats_read(struct pomp_buffer *buf,
 
 
 void vstrm_video_stats_csv_header(FILE *csv,
+				  uint8_t version,
 				  uint32_t mb_status_class_count,
 				  uint32_t mb_status_zone_count);
 

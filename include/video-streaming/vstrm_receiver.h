@@ -329,4 +329,36 @@ int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
 					     const struct vmeta_session **meta);
 
 
+/**
+ * Get the receiver to sender clock delta value in microseconds.
+ * The value is provided through the delta parameter; the precision of the clock
+ * delta in microseconds is provided through the optional precision parameter.
+ * If the clock delta value is not available, -EAGAIN is returned.
+ * @param self: receiver instance handle
+ * @param delta: pointer to the clock delta (output)
+ * @param precision: optional pointer to the clock delta precision (output)
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_receiver_get_clock_delta(struct vstrm_receiver *self,
+				   int64_t *delta,
+				   uint32_t *precision);
+
+
+/**
+ * Set the receiver video stats.
+ * The caller must provide a filled video stats structure. The stats are
+ * copied internally and the stats structure can be freed when returning from
+ * the function. Only the timestamp and the presentation-related fields of the
+ * structure (v2) are taken into account; therefore the version value must be 2
+ * in the structure.
+ * @param self: receiver instance handle
+ * @param stats: pointer to the new video stats structure
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API
+int vstrm_receiver_set_video_stats(struct vstrm_receiver *self,
+				   const struct vstrm_video_stats *stats);
+
+
 #endif /* !_VSTRM_RECEIVER_H_ */

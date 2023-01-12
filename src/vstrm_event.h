@@ -52,4 +52,4 @@ int vstrm_event_read(struct pomp_buffer *buf,
 		     enum vstrm_event *event);
 
 
-#endif /* !_VSTRM_CLOCK_DELTA_H_ */
+#endif /* !_VSTRM_EVENT_H_ */

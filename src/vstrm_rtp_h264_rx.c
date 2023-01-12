@@ -795,47 +795,6 @@ vstrm_rtp_h264_rx_dump_mb_status(struct vstrm_rtp_h264_rx *self,
 
 
 static void
-vstrm_rtp_h264_rx_update_timing_stats(struct vstrm_rtp_h264_rx *self,
-				      uint64_t out_timestamp)
-{
-	uint32_t ntpTimestampDelta = 0;
-
-	if (self->au.timestamp.ntp != 0 && self->au.last_timestamp.ntp != 0) {
-		ntpTimestampDelta =
-			self->au.timestamp.ntp - self->au.last_timestamp.ntp;
-	} else {
-		ntpTimestampDelta = self->au.timestamp.ntp_raw -
-				    self->au.last_timestamp.ntp_raw;
-	}
-
-	uint32_t outputTimestampDelta =
-		out_timestamp - self->au.last_out_timestamp;
-
-	int32_t estimatedLatency =
-		(self->au.timestamp.ntp_local == 0)
-			? 0
-			: out_timestamp - self->au.timestamp.ntp_local;
-	if (estimatedLatency < 0)
-		estimatedLatency = 0;
-
-	int32_t timingError = ntpTimestampDelta - outputTimestampDelta;
-
-	self->video_stats.timestamp_delta_integral += ntpTimestampDelta;
-	self->video_stats.timestamp_delta_integral_sq +=
-		(uint64_t)ntpTimestampDelta * (uint64_t)ntpTimestampDelta;
-
-	self->video_stats.timing_error_integral +=
-		(timingError < 0) ? -timingError : timingError;
-	self->video_stats.timing_error_integral_sq +=
-		(int64_t)timingError * (int64_t)timingError;
-
-	self->video_stats.estimated_latency_integral += estimatedLatency;
-	self->video_stats.estimated_latency_integral_sq +=
-		(uint64_t)estimatedLatency * (uint64_t)estimatedLatency;
-}
-
-
-static void
 vstrm_rtp_h264_rx_update_err_sec_stats(struct vstrm_rtp_h264_rx *self,
 				       struct vstrm_video_stats_dyn *dyn,
 				       uint32_t zone)
@@ -843,7 +802,7 @@ vstrm_rtp_h264_rx_update_err_sec_stats(struct vstrm_rtp_h264_rx *self,
 	if (self->au.timestamp.ntp_raw >
 	    self->err_sec_start_time + VSTRM_USECS_PER_SEC) {
 		self->err_sec_start_time = self->au.timestamp.ntp_raw;
-		self->video_stats.errored_second_count++;
+		self->video_stats.v2.errored_second_count++;
 	}
 	if (self->au.timestamp.ntp_raw >
 	    self->err_sec_start_time_by_zone[zone] + VSTRM_USECS_PER_SEC) {
@@ -878,6 +837,7 @@ vstrm_rtp_h264_rx_update_mb_status_stats(struct vstrm_rtp_h264_rx *self)
 
 
 static void vstrm_rtp_h264_rx_map_timestamps(const struct vstrm_timestamp *src,
+					     uint64_t out_timestamp,
 					     struct vstrm_frame_timestamps *dst)
 {
 	dst->ntp = src->ntp;
@@ -885,7 +845,8 @@ static void vstrm_rtp_h264_rx_map_timestamps(const struct vstrm_timestamp *src,
 	dst->ntp_raw = src->ntp_raw;
 	dst->ntp_raw_unskewed = src->ntp_raw_unskewed;
 	dst->local = src->ntp_local;
-	dst->recv = src->input;
+	dst->recv_start = src->input;
+	dst->recv_end = out_timestamp;
 }
 
 
@@ -906,12 +867,12 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 		goto out;
 	}
 
-	self->video_stats.total_frame_count++;
+	self->video_stats.v2.total_frame_count++;
 
 	if (self->au.frame == NULL) {
 		/* No data in frame */
-		self->video_stats.discarded_frame_count++;
-		self->video_stats.missed_frame_count++;
+		self->video_stats.v2.discarded_frame_count++;
+		self->video_stats.v2.missed_frame_count++;
 		goto out;
 	}
 
@@ -920,14 +881,13 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 
 	/* Copy timestamp and metadata */
 	vstrm_rtp_h264_rx_map_timestamps(&self->au.timestamp,
+					 out_timestamp,
 					 &self->au.frame->base->timestamps);
 	self->au.frame->base->metadata = self->au.metadata;
 	if (self->au.frame->base->metadata)
 		vmeta_frame_ref(self->au.frame->base->metadata);
 
 	/* Update timing statistics */
-	if (!self->au.first)
-		vstrm_rtp_h264_rx_update_timing_stats(self, out_timestamp);
 	self->au.last_timestamp = self->au.timestamp;
 	self->au.last_out_timestamp = out_timestamp;
 
@@ -972,9 +932,9 @@ static int vstrm_rtp_h264_rx_au_complete(struct vstrm_rtp_h264_rx *self)
 	}
 
 	/* Notify upper layer */
-	self->video_stats.output_frame_count++;
+	self->video_stats.v2.output_frame_count++;
 	if (self->au.frame->base->info.error)
-		self->video_stats.errored_output_frame_count++;
+		self->video_stats.v2.errored_output_frame_count++;
 	if (!self->au.frame->base->info.complete &&
 	    CHECK_FLAG(self->cfg.flags, H264_GEN_CONCEALMENT_SLICE)) {
 		ULOGW("rtp_h264: incomplete frame");
@@ -1043,8 +1003,8 @@ vstrm_rtp_h264_rx_check_missing_frames(struct vstrm_rtp_h264_rx *self)
 						self->au.info.mb_total,
 						VSTRM_FRAME_MB_STATUS_MISSING,
 						&self->au.frame->base->info);
-		self->video_stats.total_frame_count += missing;
-		self->video_stats.missed_frame_count += missing;
+		self->video_stats.v2.total_frame_count += missing;
+		self->video_stats.v2.missed_frame_count += missing;
 		vstrm_rtp_h264_rx_update_mb_status_stats(self);
 	}
 }
@@ -1749,11 +1709,6 @@ static int vstrm_rtp_h264_rx_process_extheader(struct vstrm_rtp_h264_rx *self,
 		goto out;
 	}
 
-	/* Remember RSSI from metadata */
-	(void)vmeta_frame_get_wifi_rssi(self->au.metadata,
-					&self->video_stats.rssi);
-	/* Ignore errors as the RSSI is not available on non-wifi links */
-
 out:
 	return res;
 }
@@ -1815,7 +1770,7 @@ int vstrm_rtp_h264_rx_new(const struct vstrm_rtp_h264_rx_cfg *cfg,
 		goto error;
 
 	/* Setup video statistics */
-	self->video_stats.version = VSTRM_VIDEO_STATS_VERSION;
+	self->video_stats.version = VSTRM_VIDEO_STATS_VERSION_2;
 	self->video_stats.mb_status_class_count =
 		VSTRM_H264_MB_STATUS_CLASS_COUNT;
 	self->video_stats.mb_status_zone_count =
@@ -1975,11 +1930,9 @@ int vstrm_rtp_h264_rx_process_packet(struct vstrm_rtp_h264_rx *self,
 						    pkt->extheader.len);
 	}
 
-	/* TODO: use correct timestamp */
-	if (self->nalu.first) {
-		self->video_stats.timestamp = timestamp->ntp_raw;
+	if (self->nalu.first)
 		self->au.timestamp = *timestamp;
-	}
+
 	self->marker = RTP_PKT_HEADER_FLAGS_GET(pkt->header.flags, MARKER);
 
 	switch (nalu_type) {
@@ -2057,6 +2010,7 @@ out:
 	return res;
 }
 
+
 int vstrm_rtp_h264_rx_get_video_stats(
 	struct vstrm_rtp_h264_rx *self,
 	const struct vstrm_video_stats **video_stats,
@@ -2067,6 +2021,47 @@ int vstrm_rtp_h264_rx_get_video_stats(
 	ULOG_ERRNO_RETURN_ERR_IF(video_stats_dyn == NULL, EINVAL);
 	*video_stats = &self->video_stats;
 	*video_stats_dyn = &self->video_stats_dyn;
+	return 0;
+}
+
+
+int vstrm_rtp_h264_rx_set_video_stats(
+	struct vstrm_rtp_h264_rx *self,
+	const struct vstrm_video_stats *video_stats)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(video_stats == NULL, EINVAL);
+
+	if (self->video_stats.version != VSTRM_VIDEO_STATS_VERSION_2)
+		return -EPROTO;
+
+	/* The timestamp must be set by the caller to a monotonic timestamp
+	 * on the sender's clock, e.g. a frame capture timestamp */
+	if (video_stats->timestamp == 0)
+		return 0;
+
+	self->video_stats.timestamp = video_stats->timestamp;
+	self->video_stats.v2.presentation_frame_count =
+		video_stats->v2.presentation_frame_count;
+	self->video_stats.v2.presentation_timestamp_delta_integral =
+		video_stats->v2.presentation_timestamp_delta_integral;
+	self->video_stats.v2.presentation_timestamp_delta_integral_sq =
+		video_stats->v2.presentation_timestamp_delta_integral_sq;
+	self->video_stats.v2.presentation_timing_error_integral =
+		video_stats->v2.presentation_timing_error_integral;
+	self->video_stats.v2.presentation_timing_error_integral_sq =
+		video_stats->v2.presentation_timing_error_integral_sq;
+	self->video_stats.v2.presentation_estimated_latency_integral =
+		video_stats->v2.presentation_estimated_latency_integral;
+	self->video_stats.v2.presentation_estimated_latency_integral_sq =
+		video_stats->v2.presentation_estimated_latency_integral_sq;
+	self->video_stats.v2.player_latency_integral =
+		video_stats->v2.player_latency_integral;
+	self->video_stats.v2.player_latency_integral_sq =
+		video_stats->v2.player_latency_integral_sq;
+	self->video_stats.v2.estimated_latency_precision_integral =
+		video_stats->v2.estimated_latency_precision_integral;
+
 	return 0;
 }
 

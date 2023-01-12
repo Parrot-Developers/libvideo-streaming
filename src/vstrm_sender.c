@@ -121,9 +121,12 @@ vstrm_sender_rtcp_receiver_report_cb(const struct rtcp_pkt_receiver_report *rr,
 	}
 
 	if (self->cbs.receiver_report != NULL) {
+		struct rtcp_pkt_receiver_report rr_out = *rr;
+		rr_out.reports[0].jitter = (uint32_t)rtp_timestamp_to_us(
+			rr->reports[0].jitter, VSTRM_RTP_H264_CLK_RATE);
 		/* Notify callback */
 		(*self->cbs.receiver_report)(
-			self, rr, rtd_us, self->cbs_userdata);
+			self, &rr_out, rtd_us, self->cbs_userdata);
 	}
 }
 
@@ -213,6 +216,7 @@ static void vstrm_sender_rtcp_app_video_stats_cb(struct vstrm_sender *self,
 		if (!self->dbg.video_stats_csv_header) {
 			vstrm_video_stats_csv_header(
 				self->dbg.video_stats_csv,
+				self->video_stats.version,
 				self->video_stats.mb_status_class_count,
 				self->video_stats.mb_status_zone_count);
 			self->dbg.video_stats_csv_header = 1;
@@ -568,6 +572,15 @@ static void vstrm_sender_monitor_send_data_ready(struct vstrm_sender *self,
 }
 
 
+static void tpkt_user_data_release_cb(struct tpkt_packet *tpkt, void *user_data)
+{
+	ULOG_ERRNO_RETURN_IF(tpkt == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_IF(user_data == NULL, EINVAL);
+
+	free(user_data);
+}
+
+
 static void vstrm_sender_process_queue(struct vstrm_sender *self)
 {
 	int res = 0;
@@ -577,6 +590,7 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 	struct timespec ts = {0, 0};
 	uint64_t cur_timestamp = 0;
 	uint64_t delta = 0;
+	bool marker = false;
 
 	while (!list_is_empty(&self->packets)) {
 		/* Get next packet */
@@ -587,15 +601,32 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 		res = tpkt_new_from_buffer(rtp_pkt->raw.buf, &pkt);
 		if (res < 0) {
 			ULOG_ERRNO("tpkt_new_from_buffer", -res);
-			break;
+			goto error_next;
 		}
+		res = tpkt_set_importance(pkt, rtp_pkt->importance);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_set_importance", -res);
+			goto error_next;
+		}
+		if (rtp_pkt->userdata != NULL) {
+			res = tpkt_set_user_data(pkt,
+						 tpkt_user_data_release_cb,
+						 rtp_pkt->userdata);
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_set_user_data", -res);
+				goto error_next;
+			}
+		}
+		marker =
+			RTP_PKT_HEADER_FLAGS_GET(rtp_pkt->header.flags, MARKER);
 
 		/* Send packet, consider it handled if success or error
 		 * that is not try again later (lower queue full) */
-		res = (*self->cbs.send_data)(self, pkt, self->cbs_userdata);
-		tpkt_unref(pkt);
-		pkt = NULL;
+		res = (*self->cbs.send_data)(
+			self, pkt, marker, self->cbs_userdata);
 		if (res == 0 || res != -EAGAIN) {
+			tpkt_unref(pkt);
+			pkt = NULL;
 			if (res != 0) {
 				ULOG_ERRNO("cbs.send_data", -res);
 			} else if (self->dbg.rtp_out != NULL) {
@@ -617,8 +648,26 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 			list_del(&rtp_pkt->node);
 			rtp_pkt_destroy(rtp_pkt);
 		} else {
+			/* res == -EAGAIN */
+			/* The rtp_pkt is not destroyed, the userdata must
+			 * not be freed by the tpkt.
+			 * The ownership is given back to the rtp_pkt. */
+			res = tpkt_set_user_data(pkt, NULL, NULL);
+			if (res < 0)
+				ULOG_ERRNO("tpkt_set_user_data", -res);
+			tpkt_unref(pkt);
+			pkt = NULL;
 			/* Queue full */
 			break;
+		}
+		continue;
+
+		/* clang-format off */
+error_next:
+		/* clang-format on */
+		if (pkt) {
+			tpkt_unref(pkt);
+			pkt = NULL;
 		}
 	}
 
@@ -655,6 +704,7 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
 				rtp_pkt->payload.len + rtp_pkt->padding.len;
 			list_del(&rtp_pkt->node);
+			free(rtp_pkt->userdata);
 			rtp_pkt_destroy(rtp_pkt);
 		}
 	}
@@ -822,6 +872,7 @@ int vstrm_sender_destroy(struct vstrm_sender *self)
 		pkt = list_entry(
 			list_first(&self->packets), struct rtp_pkt, node);
 		list_del(&pkt->node);
+		free(pkt->userdata);
 		rtp_pkt_destroy(pkt);
 	}
 
@@ -886,6 +937,22 @@ int vstrm_sender_send_frame(struct vstrm_sender *self,
 		/* TODO: handle wrap */
 		pkt->rtp_timestamp = rtp_timestamp;
 		pkt->in_timestamp = cur_timestamp;
+
+		if (frame->ancillary_data.data != NULL &&
+		    frame->ancillary_data.size > 0) {
+			/* Copy frame ancillary data in the rtp_pkt userdata */
+			void *rtp_pkt_userdata =
+				calloc(1, frame->ancillary_data.size);
+			if (rtp_pkt_userdata == NULL) {
+				ULOG_ERRNO("calloc", -res);
+			} else {
+				memcpy(rtp_pkt_userdata,
+				       frame->ancillary_data.data,
+				       frame->ancillary_data.size);
+				pkt->userdata = rtp_pkt_userdata;
+			}
+		}
+
 		/* The output timestamp is the earliest between
 		 * the frame TS + the max total latency
 		 * (if the max total latency is not null) and
@@ -1151,5 +1218,23 @@ int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(meta == NULL, EINVAL);
 
 	*meta = &self->session_metadata_peer;
+	return 0;
+}
+
+int vstrm_sender_get_clock_delta(struct vstrm_sender *self,
+				 int64_t *delta,
+				 uint32_t *precision)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(delta == NULL, EINVAL);
+
+	if (self->clock_delta_ctx.clock_delta_valid == 0)
+		return -EAGAIN;
+
+	*delta = self->clock_delta_ctx.clock_delta_avg;
+	if (precision) {
+		*precision =
+			(uint32_t)(self->clock_delta_ctx.rt_delay_min_avg / 2);
+	}
 	return 0;
 }

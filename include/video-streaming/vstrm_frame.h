@@ -147,7 +147,10 @@ struct vstrm_frame_timestamps {
 	uint64_t local;
 
 	/* First packet reception timestamp on the local monotonic clock */
-	uint64_t recv;
+	uint64_t recv_start;
+
+	/* Last packet reception timestamp on the local monotonic clock */
+	uint64_t recv_end;
 };
 
 
@@ -256,6 +259,15 @@ struct vstrm_frame {
 
 	/* Additional user data associated with this frame */
 	void *userdata;
+
+	/* Additional ancillary data that is copied as userdata for
+	 * each of the rtp_packets made from this frame, then in each
+	 * of the tpkt_packets. The caller is responsible for freeing
+	 * the structure in the vstrm_frame dispose_cb */
+	struct {
+		const void *data;
+		size_t size;
+	} ancillary_data;
 };
 
 

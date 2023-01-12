@@ -106,6 +106,11 @@ int vstrm_rtp_h264_rx_get_video_stats(
 	const struct vstrm_video_stats_dyn **video_stats_dyn);
 
 
+int vstrm_rtp_h264_rx_set_video_stats(
+	struct vstrm_rtp_h264_rx *self,
+	const struct vstrm_video_stats *video_stats);
+
+
 int vstrm_rtp_h264_rx_get_codec_info(struct vstrm_rtp_h264_rx *self,
 				     const struct vstrm_codec_info **info);
 

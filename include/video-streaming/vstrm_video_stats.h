@@ -29,72 +29,178 @@
 
 
 /* Video statistics version number */
-#define VSTRM_VIDEO_STATS_VERSION 1
+#define VSTRM_VIDEO_STATS_VERSION_1 1
+#define VSTRM_VIDEO_STATS_VERSION_2 2
 
 
 /* Video statistics - static */
 struct vstrm_video_stats {
-	/* Video statistics version, see VSTRM_VIDEO_STATS_VERSION */
+	/* Video statistics version */
 	uint8_t version;
 
-	/* Wifi RSSI (dBm) (0 if unknown) */
-	int8_t rssi;
-
-	/* Timestamp associated with the video statistics (us, monotonic) */
+	/* Timestamp associated with the video statistics (us, monotonic);
+	 * In v2 format, this must be set on the receiver side to a monotonic
+	 * timestamp on the sender's clock (e.g. a frame capture timestamp)
+	 * through the vstrm_receiver_set_video_stats() function */
 	uint64_t timestamp;
 
-	/* Total frame counter including all output, discarded and
-	 * missing frames */
-	uint32_t total_frame_count;
+	union {
+		struct {
+			/* Wifi RSSI (dBm) (0 if unknown) */
+			int8_t rssi;
 
-	/* Output frame counter; output frames are frames that are output
-	 * from the library, regardless of their valid or errored status */
-	uint32_t output_frame_count;
+			/* Total frame counter including all output, discarded
+			 * and missing frames */
+			uint32_t total_frame_count;
 
-	/* Errored output frame counter (included in output_frame_count);
-	 * errored output frames are frames output from the library that
-	 * contain errors (either incomplete frames with or without error
-	 * concealment, or frames within error propagation) */
-	uint32_t errored_output_frame_count;
+			/* Output frame counter; output frames are frames that
+			 * are output from the receiver, regardless of their
+			 * valid or errored status */
+			uint32_t output_frame_count;
 
-	/* Missed frame counter; missed frames are frames that either have
-	 * been discarded or that are completely absent from the received
-	 * stream (note: absent non-reference frames are not counted as missed
-	 * frames, as there is no error propagation) */
-	uint32_t missed_frame_count;
+			/* Errored output frame counter (included in
+			 * output_frame_count); errored output frames are frames
+			 * output from the receiver that contain errors (either
+			 * incomplete frames with or without error concealment,
+			 * or frames within error propagation) */
+			uint32_t errored_output_frame_count;
 
-	/* Discarded frame counter (included in missed_frame_count); discarded
-	 * frames are frames that are not output because they are incomplete
-	 * and error concealment failed */
-	uint32_t discarded_frame_count;
+			/* Missed frame counter; missed frames are frames that
+			 * either have been discarded or that are completely
+			 * absent from the received stream (note: absent
+			 * non-reference frames are not counted as missed
+			 * frames, as there is no error propagation) */
+			uint32_t missed_frame_count;
 
-	/* Frame timestamp delta integral value; timestamp delta is the time
-	 * difference between two consecutive output frames acquisition
-	 * timestamps */
-	uint64_t timestamp_delta_integral;
+			/* Discarded frame counter (included in
+			 * missed_frame_count); discarded frames are frames that
+			 * are not output because they are incomplete and error
+			 * concealment failed */
+			uint32_t discarded_frame_count;
 
-	/* Frame timestamp delta squared integral value */
-	uint64_t timestamp_delta_integral_sq;
+			/* Frame timestamp delta integral value; timestamp delta
+			 * is the time difference between two consecutive output
+			 * frames acquisition timestamps */
+			uint64_t timestamp_delta_integral;
 
-	/* Frame timing error integral value; the timing error is the absolute
-	 * difference between acquisition timestamp delta and output timestamp
-	 * delta for two consecutive output frames */
-	uint64_t timing_error_integral;
+			/* Frame timestamp delta squared integral value */
+			uint64_t timestamp_delta_integral_sq;
 
-	/* Frame timing error squared integral value */
-	uint64_t timing_error_integral_sq;
+			/* Frame timing error integral value; the timing error
+			 * is the absolute difference between acquisition
+			 * timestamp delta and output timestamp delta for two
+			 * consecutive output frames */
+			uint64_t timing_error_integral;
 
-	/* Frame estimated latency integral value; the estimated latency is
-	 * the difference between a frame output timestamp and acquisition
-	 * timestamp using an estimation of the clock difference between the
-	 * sender and the receiver */
-	uint64_t estimated_latency_integral;
+			/* Frame timing error squared integral value */
+			uint64_t timing_error_integral_sq;
 
-	/* Frame estimated latency squared integral value */
-	uint64_t estimated_latency_integral_sq;
+			/* Frame estimated latency integral value; the estimated
+			 * latency is the difference between a frame output
+			 * timestamp and acquisition timestamp using an
+			 * estimation of the clock difference between the sender
+			 * and the receiver */
+			uint64_t estimated_latency_integral;
 
-	/* Errored second counter (on whole frames) */
-	uint32_t errored_second_count;
+			/* Frame estimated latency squared integral value */
+			uint64_t estimated_latency_integral_sq;
+
+			/* Errored second counter (on whole frames) */
+			uint32_t errored_second_count;
+		} v1;
+
+		struct {
+			/* Total frame counter including all output, discarded
+			 * and missing frames */
+			uint32_t total_frame_count;
+
+			/* Output frame counter; output frames are frames that
+			 * are output from the receiver, regardless of their
+			 * valid or errored status */
+			uint32_t output_frame_count;
+
+			/* Errored output frame counter (included in
+			 * output_frame_count); errored output frames are frames
+			 * output from the receiver that contain errors (either
+			 * incomplete frames with or without error concealment,
+			 * or frames within error propagation) */
+			uint32_t errored_output_frame_count;
+
+			/* Missed frame counter; missed frames are frames that
+			 * either have been discarded or that are completely
+			 * absent from the received stream (note: absent
+			 * non-reference frames are not counted as missed
+			 * frames, as there is no error propagation) */
+			uint32_t missed_frame_count;
+
+			/* Discarded frame counter (included in
+			 * missed_frame_count); discarded frames are frames that
+			 * are not output from the receiver because they are
+			 * incomplete and error concealment failed */
+			uint32_t discarded_frame_count;
+
+			/* Errored second counter (on whole frames) */
+			uint32_t errored_second_count;
+
+			/**
+			 * Presentation-related fields below; these fields
+			 * are updated on the receiver side through the
+			 * vstrm_receiver_set_video_stats() function, at the
+			 * same time as the timestamp field above
+			 */
+
+			/* Presentation frame counter i.e. frames that reach
+			 * presentation; this value can be used with the
+			 * integral time values below to compute average values
+			 * over a time period */
+			uint32_t presentation_frame_count;
+
+			/* Presentation frame timestamp delta integral value;
+			 * timestamp delta is the time difference between two
+			 * consecutive presentation frames acquisition
+			 * timestamps */
+			uint64_t presentation_timestamp_delta_integral;
+
+			/* Presentation frame timestamp delta squared
+			 * integral value */
+			uint64_t presentation_timestamp_delta_integral_sq;
+
+			/* Frame presentation timing error integral value;
+			 * the timing error is the absolute difference between
+			 * acquisition timestamp delta and presentation
+			 * timestamp delta for two consecutive presentation
+			 * frames */
+			uint64_t presentation_timing_error_integral;
+
+			/* Frame presentation timing error squared integral
+			 * value */
+			uint64_t presentation_timing_error_integral_sq;
+
+			/* Frame estimated latency integral value; the estimated
+			 * latency is the difference between a frame
+			 * presentation timestamp and acquisition timestamp
+			 * using an estimation of the clock difference between
+			 * the sender and the receiver */
+			uint64_t presentation_estimated_latency_integral;
+
+			/* Frame estimated latency squared integral value */
+			uint64_t presentation_estimated_latency_integral_sq;
+
+			/* Player-side frame latency integral value;
+			 * the player latency is the difference between a frame
+			 * presentation timestamp and the output timestamp of
+			 * the frame from the reeciver */
+			uint64_t player_latency_integral;
+
+			/* Player-side frame latency squared integral value */
+			uint64_t player_latency_integral_sq;
+
+			/* Estimated latency precision integral value; this is
+			 * the precision of the estimation of the clock
+			 * difference between the sender and the receiver */
+			uint64_t estimated_latency_precision_integral;
+		} v2;
+	};
 
 	/* Macroblock status class count */
 	uint32_t mb_status_class_count;

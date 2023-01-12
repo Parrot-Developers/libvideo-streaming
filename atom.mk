@@ -6,7 +6,7 @@ LOCAL_MODULE := libvideo-streaming
 LOCAL_CATEGORY_PATH := libs
 LOCAL_DESCRIPTION := Video streaming library
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include
-LOCAL_CFLAGS := -DVSTRM_API_EXPORTS -fvisibility=hidden -std=gnu99
+LOCAL_CFLAGS := -DVSTRM_API_EXPORTS -fvisibility=hidden -std=gnu99 -D_GNU_SOURCE
 LOCAL_SRC_FILES := \
 	src/vstrm_clock_delta.c \
 	src/vstrm_dbg.c \

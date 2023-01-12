@@ -221,6 +221,7 @@ static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 
 static int send_data_cb(struct vstrm_sender *stream,
 			struct tpkt_packet *pkt,
+			bool marker,
 			void *userdata)
 {
 	struct vstrm_test_sender *self = userdata;
