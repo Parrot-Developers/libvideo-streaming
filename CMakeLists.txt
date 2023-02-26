@@ -19,6 +19,9 @@ set(LIB_SOURCES
 )
 
 add_library(video-streaming ${LIB_SOURCES})
+set_target_properties(video-streaming PROPERTIES
+                    POSITION_INDEPENDENT_CODE ${BUILD_SHARED_LIBS}
+)
 
 target_include_directories(video-streaming PUBLIC
                             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
