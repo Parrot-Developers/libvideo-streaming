@@ -1,11 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 project(video-streaming VERSION 1.0)
 
-if(COMMAND set_up_rpath)
-    set_up_rpath()
-else()
-    message("Set up rpath not defined!")
-endif()
 
 option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 
@@ -25,6 +20,12 @@ set(LIB_SOURCES
 )
 
 add_library(${PROJECT_NAME} ${LIB_SOURCES})
+
+if(COMMAND set_up_rpath)
+    set_up_rpath()
+else()
+    message("Set up rpath not defined!")
+endif()
 
 target_include_directories(${PROJECT_NAME} PUBLIC
                             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
