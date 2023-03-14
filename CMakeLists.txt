@@ -19,7 +19,10 @@ set(LIB_SOURCES
                 src/vstrm_video_stats.c
 )
 
-add_library(${PROJECT_NAME} ${LIB_SOURCES})
+add_library(${PROJECT_NAME} SHARED ${LIB_SOURCES})
+set_target_properties(${PROJECT_NAME} PROPERTIES
+                    POSITION_INDEPENDENT_CODE ${BUILD_SHARED_LIBS}
+)
 
 if(COMMAND set_up_rpath)
     set_up_rpath()
