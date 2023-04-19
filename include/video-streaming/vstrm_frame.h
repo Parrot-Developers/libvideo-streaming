@@ -47,10 +47,10 @@ struct vstrm_frame;
 #define VSTRM_FRAME_COPY_FLAGS_FILTER_SEI 0x08
 
 /* Maximum number of NAL units importance levels */
-#define VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS 4
+#define VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS 8
 
 /* Maximum number of NAL units priority levels */
-#define VSTRM_FRAME_MAX_NALU_PRIORITY_LEVELS 5
+#define VSTRM_FRAME_MAX_NALU_PRIORITY_LEVELS 8
 
 
 /* Codec */
@@ -209,12 +209,12 @@ struct vstrm_frame_nalu {
 	/* NAL unit size in bytes */
 	size_t len;
 
-	/* Priority of the NAL unit (sender only);
-	 * (0 .. VSTRM_FRAME_MAX_NALU_PRIORITY_LEVELS) */
+	/* Priority of the NAL unit (sender only) - lower number means more
+	 * priority; (0 .. VSTRM_FRAME_MAX_NALU_PRIORITY_LEVELS - 1) */
 	uint32_t priority;
 
-	/* Importance of the NAL unit (sender only);
-	 * (0 .. VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) */
+	/* Importance of the NAL unit (sender only) - lower number means more
+	 * importance; (0 .. VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS - 1) */
 	uint32_t importance;
 
 	/* Additional user data associated with this NAL unit */

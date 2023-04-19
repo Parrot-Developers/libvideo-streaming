@@ -179,8 +179,17 @@ struct vstrm_sender_stats {
 	/* Overall total packet count (RTP) */
 	uint32_t total_packet_count;
 
+	/* Total packet count (RTP) per importance level */
+	uint32_t total_packet_count_per_importance
+		[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
+
 	/* Overall total byte count (RTP header + ext + payload + padding) */
 	uint32_t total_byte_count;
+
+	/* Total byte count (RTP header + ext + payload + padding) per
+	 * importance level */
+	uint32_t total_byte_count_per_importance
+		[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
 
 	/* Overall total header byte count (RTP) */
 	uint32_t total_header_byte_count;
@@ -197,8 +206,16 @@ struct vstrm_sender_stats {
 	/* Overall dropped packet count */
 	uint32_t dropped_packet_count;
 
+	/* Dropped packet count per importance level */
+	uint32_t dropped_packet_count_per_importance
+		[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
+
 	/* Overall dropped byte count */
 	uint32_t dropped_byte_count;
+
+	/* Dropped byte count per importance level */
+	uint32_t dropped_byte_count_per_importance
+		[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
 
 	/* Overall total sent control packet count (RTCP) */
 	uint32_t total_control_sent_packet_count;

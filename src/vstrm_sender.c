@@ -645,6 +645,17 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 				rtp_pkt->payload.len;
 			self->stats.total_padding_byte_count +=
 				rtp_pkt->padding.len;
+			if (rtp_pkt->importance <
+			    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
+				self->stats.total_packet_count_per_importance
+					[rtp_pkt->importance]++;
+				self->stats.total_byte_count_per_importance
+					[rtp_pkt->importance] +=
+					RTP_PKT_HEADER_SIZE +
+					rtp_pkt->extheader.len +
+					rtp_pkt->payload.len +
+					rtp_pkt->padding.len;
+			}
 			list_del(&rtp_pkt->node);
 			rtp_pkt_destroy(rtp_pkt);
 		} else {
@@ -703,6 +714,25 @@ error_next:
 			self->stats.dropped_byte_count +=
 				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
 				rtp_pkt->payload.len + rtp_pkt->padding.len;
+			if (rtp_pkt->importance <
+			    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
+				self->stats.total_packet_count_per_importance
+					[rtp_pkt->importance]++;
+				self->stats.total_byte_count_per_importance
+					[rtp_pkt->importance] +=
+					RTP_PKT_HEADER_SIZE +
+					rtp_pkt->extheader.len +
+					rtp_pkt->payload.len +
+					rtp_pkt->padding.len;
+				self->stats.dropped_packet_count_per_importance
+					[rtp_pkt->importance]++;
+				self->stats.dropped_byte_count_per_importance
+					[rtp_pkt->importance] +=
+					RTP_PKT_HEADER_SIZE +
+					rtp_pkt->extheader.len +
+					rtp_pkt->payload.len +
+					rtp_pkt->padding.len;
+			}
 			list_del(&rtp_pkt->node);
 			free(rtp_pkt->userdata);
 			rtp_pkt_destroy(rtp_pkt);

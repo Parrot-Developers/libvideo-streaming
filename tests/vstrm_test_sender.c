@@ -37,6 +37,7 @@ ULOG_DECLARE_TAG(vstrm_test_sender);
 #define MAX_NETWORK_LATENCY_CLASS_1 200
 #define MAX_NETWORK_LATENCY_CLASS_2 150
 #define MAX_NETWORK_LATENCY_CLASS_3 100
+#define MAX_NETWORK_LATENCY_CLASS_DEFAULT 50
 
 
 static void unmap_file(struct vstrm_test_sender *self)
@@ -678,6 +679,14 @@ int vstrm_test_sender_create(const char *file,
 	vstrm_cfg.dyn.max_network_latency_ms[1] = MAX_NETWORK_LATENCY_CLASS_1;
 	vstrm_cfg.dyn.max_network_latency_ms[2] = MAX_NETWORK_LATENCY_CLASS_2;
 	vstrm_cfg.dyn.max_network_latency_ms[3] = MAX_NETWORK_LATENCY_CLASS_3;
+	vstrm_cfg.dyn.max_network_latency_ms[4] =
+		MAX_NETWORK_LATENCY_CLASS_DEFAULT;
+	vstrm_cfg.dyn.max_network_latency_ms[5] =
+		MAX_NETWORK_LATENCY_CLASS_DEFAULT;
+	vstrm_cfg.dyn.max_network_latency_ms[6] =
+		MAX_NETWORK_LATENCY_CLASS_DEFAULT;
+	vstrm_cfg.dyn.max_network_latency_ms[7] =
+		MAX_NETWORK_LATENCY_CLASS_DEFAULT;
 
 	/* Create sender */
 	res = vstrm_sender_new(&vstrm_cfg, &vstrm_cbs, self, &self->sender);
