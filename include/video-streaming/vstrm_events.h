@@ -48,6 +48,10 @@ enum vstrm_event {
 	 * shutter trigger) */
 	VSTRM_EVENT_PHOTO_TRIGGER = 3,
 
+	/* Framerate change, which is not a whole pipeline reconfiguration
+	 * (e.g. when switching between visible and thermal modes) */
+	VSTRM_EVENT_FRAMERATE_CHANGE = 4,
+
 	/* Element count */
 	VSTRM_EVENT_MAX,
 };

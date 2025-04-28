@@ -183,6 +183,15 @@ struct vstrm_sender_stats {
 	uint32_t total_packet_count_per_importance
 		[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
 
+	/* Overall total single-NALU packet count (RTP) */
+	uint32_t single_nalu_packet_count;
+
+	/* Overall total aggregation (STAP-A) packet count (RTP) */
+	uint32_t stap_packet_count;
+
+	/* Overall total fragmentation (FU-A) packet count (RTP) */
+	uint32_t fu_packet_count;
+
 	/* Overall total byte count (RTP header + ext + payload + padding) */
 	uint32_t total_byte_count;
 

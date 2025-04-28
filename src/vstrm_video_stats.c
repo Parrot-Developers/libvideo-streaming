@@ -504,7 +504,7 @@ static void video_stats_csv_header_v2(FILE *csv,
 	fprintf(csv,
 		"timestamp totalFrameCount outputFrameCount "
 		"erroredOutputFrameCount missedFrameCount discardedFrameCount "
-		"erroredSecondCount presentationFrameCount"
+		"erroredSecondCount presentationFrameCount "
 		"presentationTimestampDeltaIntegral "
 		"presentationTimestampDeltaIntegralSq "
 		"presentationTimingErrorIntegral "

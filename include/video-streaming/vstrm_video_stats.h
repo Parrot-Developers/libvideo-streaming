@@ -33,6 +33,30 @@
 #define VSTRM_VIDEO_STATS_VERSION_2 2
 
 
+/**
+ * mbuf ancillary data key for the video stats.
+ *
+ * Content is a struct vstrm_video_stats
+ */
+#define VSTRM_ANCILLARY_KEY_VIDEO_STATS "vstrm.video_stats"
+
+
+/**
+ * mbuf ancillary data key for the video stats (dynamic).
+ *
+ * Content is a struct vstrm_video_stats_dyn
+ */
+#define VSTRM_ANCILLARY_KEY_VIDEO_STATS_DYN "vstrm.video_stats_dyn"
+
+
+/**
+ * mbuf ancillary data key for the macroblock status.
+ *
+ * Content is a buffer of size vstrm_frame_info.mb_total * sizeof(uint8_t)
+ */
+#define VSTRM_ANCILLARY_KEY_MB_STATUS "vstrm.mb_status"
+
+
 /* Video statistics - static */
 struct vstrm_video_stats {
 	/* Video statistics version */
@@ -233,8 +257,8 @@ struct vstrm_video_stats_dyn {
  * When no longer needed the structure must be freed using the
  * vstrm_video_stats_dyn_clear() function.
  * @param dyn: pointer to a dynamic video statistics structure (output)
- * @param mbStatusClassCount: macroblock status class count
- * @param mbStatusZoneCount: macroblock status zone count
+ * @param mb_status_class_count: macroblock status class count
+ * @param mb_status_zone_count: macroblock status zone count
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API

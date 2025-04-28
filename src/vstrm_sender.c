@@ -66,6 +66,9 @@ struct vstrm_sender {
 	bool invalid_rtd;
 	uint64_t invalid_rtd_count;
 
+	bool data_netdown_logged;
+	bool ctrl_netdown_logged;
+
 	struct {
 		char *dir;
 		FILE *stream;
@@ -534,12 +537,24 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 		goto out;
 	}
 	res = (*self->cbs.send_ctrl)(self, pkt, self->cbs_userdata);
-	if (res < 0 && res != -EAGAIN)
-		ULOG_ERRNO("cbs.send_ctrl", -res);
-	else if (res == 0) {
+	if (res < 0 && res != -EAGAIN) {
+		if (res == -ENETUNREACH || res == -ENETDOWN) {
+			if (!self->ctrl_netdown_logged) {
+				ULOG_ERRNO("cbs.send_ctrl (logged only once)",
+					   -res);
+				self->ctrl_netdown_logged = true;
+			}
+		} else {
+			ULOG_ERRNO("cbs.send_ctrl", -res);
+			self->ctrl_netdown_logged = false;
+		}
+	} else if (res == -EAGAIN) {
+		self->ctrl_netdown_logged = false;
+	} else if (res == 0) {
 		tpkt_get_cdata(pkt, NULL, &len, NULL);
 		self->stats.total_control_sent_packet_count++;
 		self->stats.total_control_sent_byte_count += len;
+		self->ctrl_netdown_logged = false;
 	}
 
 out:
@@ -628,10 +643,26 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 			tpkt_unref(pkt);
 			pkt = NULL;
 			if (res != 0) {
-				ULOG_ERRNO("cbs.send_data", -res);
-			} else if (self->dbg.rtp_out != NULL) {
-				vstrm_dbg_write_pomp_buf(self->dbg.rtp_out,
-							 rtp_pkt->raw.buf);
+				if (res == -ENETUNREACH || res == -ENETDOWN) {
+					if (!self->data_netdown_logged) {
+						ULOG_ERRNO(
+							"cbs.send_data "
+							"(logged only once)",
+							-res);
+						self->data_netdown_logged =
+							true;
+					}
+				} else {
+					ULOG_ERRNO("cbs.send_data", -res);
+					self->data_netdown_logged = false;
+				}
+			} else {
+				self->data_netdown_logged = false;
+				if (self->dbg.rtp_out != NULL) {
+					vstrm_dbg_write_pomp_buf(
+						self->dbg.rtp_out,
+						rtp_pkt->raw.buf);
+				}
 			}
 			self->stats.total_packet_count++;
 			self->stats.total_byte_count +=
@@ -668,6 +699,7 @@ static void vstrm_sender_process_queue(struct vstrm_sender *self)
 				ULOG_ERRNO("tpkt_set_user_data", -res);
 			tpkt_unref(pkt);
 			pkt = NULL;
+			self->data_netdown_logged = false;
 			/* Queue full */
 			break;
 		}
@@ -1211,6 +1243,16 @@ int vstrm_sender_get_stats(struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(stats == NULL, EINVAL);
 
 	*stats = self->stats;
+
+	struct vstrm_rtp_h264_tx_stats rtp_h264_stats = {0};
+	int err = vstrm_rtp_h264_tx_get_stats(self->rtp_h264, &rtp_h264_stats);
+	if (err < 0)
+		ULOG_ERRNO("vstrm_rtp_h264_tx_get_stats", -err);
+	stats->single_nalu_packet_count =
+		rtp_h264_stats.single_nalu_packet_count;
+	stats->stap_packet_count = rtp_h264_stats.stap_packet_count;
+	stats->fu_packet_count = rtp_h264_stats.fu_packet_count;
+
 	return 0;
 }
 

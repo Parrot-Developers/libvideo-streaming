@@ -48,6 +48,8 @@ struct vstrm_receiver {
 	struct vstrm_codec_info codec_info;
 	uint32_t codec_info_ssrc;
 
+	bool resync_needed;
+
 	struct {
 		uint32_t ssrc;
 
@@ -721,6 +723,12 @@ static int vstrm_receiver_update_seq(struct vstrm_receiver *self, uint16_t seq)
 {
 	uint16_t udelta = seq - self->source.max_seq;
 
+	if (self->resync_needed) {
+		vstrm_receiver_init_seq(self, seq);
+		self->resync_needed = false;
+		return 1;
+	}
+
 	/* Source is not valid until MIN_SEQUENTIAL packets with
 	 * sequential sequence numbers have been received */
 	if (self->source.probation > 0) {
@@ -871,6 +879,16 @@ static void vstrm_receiver_init_source(struct vstrm_receiver *self,
 	vstrm_receiver_create_dbg_files(self);
 	vstrm_clock_delta_init(&self->source.clock_delta_ctx);
 	vstrm_receiver_init_seq(self, seq);
+}
+
+
+int vstrm_receiver_clear(struct vstrm_receiver *self)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+
+	self->resync_needed = true;
+
+	return 0;
 }
 
 
@@ -1063,24 +1081,36 @@ int vstrm_receiver_recv_ctrl(struct vstrm_receiver *self,
 	/* Remember session metadata before parsing new one found in this
 	 * RTCP packet */
 	old_session_metadata_peer = self->source.session_metadata_peer;
+	memset(&self->source.session_metadata_peer,
+	       0,
+	       sizeof(self->source.session_metadata_peer));
 
 	/* Read RTCP packet */
 	res = rtcp_pkt_read(buf, &rtcp_cbs, self);
 	if (res < 0)
-		goto out;
+		goto restore;
+
+	if (!vmeta_session_is_valid(&self->source.session_metadata_peer)) {
+		/* minimal vmeta_session for sdes, don't compare with previous
+		 */
+		goto restore;
+	}
 
 	/* Check if peer session metadata has changed */
 	if (self->cbs.session_metadata_peer_changed != NULL &&
-	    memcmp(&old_session_metadata_peer,
-		   &self->source.session_metadata_peer,
-		   sizeof(old_session_metadata_peer)) != 0) {
+	    !vmeta_session_cmp(&old_session_metadata_peer,
+			       &self->source.session_metadata_peer)) {
 		(*self->cbs.session_metadata_peer_changed)(
 			self,
 			&self->source.session_metadata_peer,
 			self->cbs_userdata);
 	}
 
-out:
+	/* coverity[missing_restore] */
+	return res;
+
+restore:
+	self->source.session_metadata_peer = old_session_metadata_peer;
 	return res;
 }
 

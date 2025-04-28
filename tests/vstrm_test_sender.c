@@ -54,7 +54,7 @@ static void unmap_file(struct vstrm_test_sender *self)
 	self->infile = INVALID_HANDLE_VALUE;
 #else
 	if (self->fd >= 0) {
-		if (self->data != NULL)
+		if (self->data != NULL && self->data_len > 0)
 			munmap(self->data, self->data_len);
 		self->data = NULL;
 		close(self->fd);
@@ -108,6 +108,8 @@ static int map_file(struct vstrm_test_sender *self)
 		goto error;
 	}
 #else
+	off_t size;
+
 	/* Try to open input file */
 	self->fd = open(self->input_file, O_RDONLY);
 	if (self->fd < 0) {
@@ -117,12 +119,14 @@ static int map_file(struct vstrm_test_sender *self)
 	}
 
 	/* Get size and map it */
-	self->data_len = lseek(self->fd, 0, SEEK_END);
-	if (self->data_len == (size_t)-1) {
+	size = lseek(self->fd, 0, SEEK_END);
+	if (size < 0) {
 		res = -errno;
 		ULOG_ERRNO("lseek", -res);
+		self->data_len = 0;
 		goto error;
 	}
+	self->data_len = (size_t)size;
 
 	self->data =
 		mmap(NULL, self->data_len, PROT_READ, MAP_PRIVATE, self->fd, 0);

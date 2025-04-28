@@ -68,20 +68,24 @@ enum vstrm_frame_mb_status {
 	/* The macroblock status is unknown */
 	VSTRM_FRAME_MB_STATUS_UNKNOWN = 0,
 
-	/* The macroblock is valid and contained in an I-slice */
+	/* The macroblock is valid and contained in an I-slice or a P-slice
+	 * with intra predictions only (e.g. within an intra refresh zone) */
 	VSTRM_FRAME_MB_STATUS_VALID_ISLICE,
 
 	/* The macroblock is valid and contained in a P-slice */
 	VSTRM_FRAME_MB_STATUS_VALID_PSLICE,
 
-	/* The macroblock is missing and concealed */
-	VSTRM_FRAME_MB_STATUS_MISSING_CONCEALED,
+	/* The macroblock is missing and concealed in a P-slice */
+	VSTRM_FRAME_MB_STATUS_MISSING_CONCEALED_PSLICE,
 
 	/* The macroblock is missing and not concealed */
 	VSTRM_FRAME_MB_STATUS_MISSING,
 
 	/* The macroblock is valid but within an error propagation */
 	VSTRM_FRAME_MB_STATUS_ERROR_PROPAGATION,
+
+	/* The macroblock is missing and concealed in an I-slice */
+	VSTRM_FRAME_MB_STATUS_MISSING_CONCEALED_ISLICE,
 };
 
 
@@ -172,6 +176,9 @@ struct vstrm_frame_info {
 
 	/* Frame is a generated grey IDR frame */
 	uint32_t gen_grey_idr:1;
+
+	/* Frame is a generated concealment P-skip frame */
+	uint32_t gen_concealment:1;
 
 	/* H.264 frame width in macroblocks */
 	uint32_t mb_width;

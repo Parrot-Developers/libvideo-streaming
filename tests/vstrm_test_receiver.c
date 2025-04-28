@@ -361,6 +361,7 @@ int vstrm_test_receiver_create(const char *local_addr,
 	vstrm_cfg.loop = self->loop;
 	vstrm_cfg.flags = VSTRM_RECEIVER_FLAGS_H264_GEN_GREY_IDR_FRAME |
 			  VSTRM_RECEIVER_FLAGS_H264_GEN_CONCEALMENT_SLICE |
+			  VSTRM_RECEIVER_FLAGS_H264_GEN_CONCEALMENT_FRAME |
 			  VSTRM_RECEIVER_FLAGS_ENABLE_RTCP |
 			  VSTRM_RECEIVER_FLAGS_ENABLE_RTCP_EXT;
 

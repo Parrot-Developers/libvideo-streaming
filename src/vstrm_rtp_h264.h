@@ -83,6 +83,13 @@ struct vstrm_rtp_h264_tx_cfg {
 };
 
 
+struct vstrm_rtp_h264_tx_stats {
+	uint32_t single_nalu_packet_count;
+	uint32_t stap_packet_count;
+	uint32_t fu_packet_count;
+};
+
+
 int vstrm_rtp_h264_rx_new(const struct vstrm_rtp_h264_rx_cfg *cfg,
 			  const struct vstrm_rtp_h264_rx_cbs *cbs,
 			  struct vstrm_rtp_h264_rx **ret_obj);
@@ -134,6 +141,10 @@ int vstrm_rtp_h264_tx_process_frame(struct vstrm_rtp_h264_tx *self,
 int vstrm_rtp_h264_tx_set_cfg_dyn(
 	struct vstrm_rtp_h264_tx *self,
 	const struct vstrm_rtp_h264_tx_cfg_dyn *cfg_dyn);
+
+
+int vstrm_rtp_h264_tx_get_stats(struct vstrm_rtp_h264_tx *self,
+				struct vstrm_rtp_h264_tx_stats *stats);
 
 
 /**

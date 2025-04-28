@@ -63,7 +63,7 @@ struct vstrm_timestamp;
 #include "vstrm_rtp_h264.h"
 #include "vstrm_video_stats_priv.h"
 
-#define VSTRM_H264_MB_STATUS_CLASS_COUNT 6
+#define VSTRM_H264_MB_STATUS_CLASS_COUNT 7
 #define VSTRM_H264_MB_STATUS_ZONE_COUNT 5
 
 #define VSTRM_USECS_PER_SEC 1000000

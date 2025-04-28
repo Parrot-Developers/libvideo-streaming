@@ -46,6 +46,9 @@ struct vstrm_receiver;
 /* Generate H.264 skipped P slices for error concealment on missing slices */
 #define VSTRM_RECEIVER_FLAGS_H264_GEN_CONCEALMENT_SLICE (1 << 4)
 
+/* Generate H.264 skipped P frames for error concealment on missing frames */
+#define VSTRM_RECEIVER_FLAGS_H264_GEN_CONCEALMENT_FRAME (1 << 7)
+
 /* Generate a H.264 grey IDR frame at the stream beginning to initialize
  * the decoding (for intra-refresh streams) */
 #define VSTRM_RECEIVER_FLAGS_H264_GEN_GREY_IDR_FRAME (1 << 5)
@@ -359,6 +362,17 @@ int vstrm_receiver_get_clock_delta(struct vstrm_receiver *self,
 VSTRM_API
 int vstrm_receiver_set_video_stats(struct vstrm_receiver *self,
 				   const struct vstrm_video_stats *stats);
+
+
+/**
+ * Clear the receiver.
+ * All pending RTP packets in the jitter buffer are discarded. On the next
+ * data (RTP) packet reception, the receiver resumes receiving frames.
+ * This is useful to properly restart the receiver after pausing the stream.
+ * @param self: receiver instance handle
+ * @return 0 on success, negative errno value in case of error
+ */
+VSTRM_API int vstrm_receiver_clear(struct vstrm_receiver *self);
 
 
 #endif /* !_VSTRM_RECEIVER_H_ */

@@ -43,6 +43,7 @@ struct vstrm_rtp_h264_tx {
 	struct vstrm_rtp_h264_tx_cfg cfg;
 	struct vstrm_frame *frame;
 	struct list_node *packets;
+	struct vstrm_rtp_h264_tx_stats stats;
 
 	struct rtp_pkt *pkt;
 	size_t pos;
@@ -313,8 +314,10 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 	}
 
 	/* Finish current packet, start a new one */
-	if (self->pkt != NULL)
+	if (self->pkt != NULL) {
+		self->stats.stap_packet_count++;
 		vstrm_rtp_h264_tx_end_pkt(self);
+	}
 	CHECK(vstrm_rtp_h264_tx_begin_pkt(
 		self, nalu->priority, nalu->importance));
 
@@ -339,6 +342,7 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 					&self->pos,
 					nalu->cdata,
 					nalu->len));
+		self->stats.single_nalu_packet_count++;
 		vstrm_rtp_h264_tx_end_pkt(self);
 	} else {
 		/* Fragmentation */
@@ -367,6 +371,7 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 						&self->pos,
 						nalu->cdata + off,
 						len));
+			self->stats.fu_packet_count++;
 			vstrm_rtp_h264_tx_end_pkt(self);
 			if (!end)
 				CHECK(vstrm_rtp_h264_tx_begin_pkt(
@@ -439,8 +444,10 @@ int vstrm_rtp_h264_tx_process_frame(struct vstrm_rtp_h264_tx *self,
 	}
 
 	/* Finish last packet */
-	if (self->pkt != NULL)
+	if (self->pkt != NULL) {
+		self->stats.stap_packet_count++;
 		vstrm_rtp_h264_tx_end_pkt(self);
+	}
 	self->pkt = NULL;
 
 	/* Set market bit of last packet */
@@ -479,5 +486,16 @@ int vstrm_rtp_h264_tx_set_cfg_dyn(
 	ULOG_ERRNO_RETURN_ERR_IF(cfg_dyn == NULL, EINVAL);
 
 	self->cfg.dyn = *cfg_dyn;
+	return 0;
+}
+
+
+int vstrm_rtp_h264_tx_get_stats(struct vstrm_rtp_h264_tx *self,
+				struct vstrm_rtp_h264_tx_stats *stats)
+{
+	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(stats == NULL, EINVAL);
+
+	*stats = self->stats;
 	return 0;
 }

@@ -90,6 +90,8 @@ enum vstrm_event vstrm_event_from_str(const char *str)
 		return VSTRM_EVENT_RESOLUTION_CHANGE;
 	else if (strcasecmp(str, "PHOTO_TRIGGER") == 0)
 		return VSTRM_EVENT_PHOTO_TRIGGER;
+	else if (strcasecmp(str, "FRAMERATE_CHANGE") == 0)
+		return VSTRM_EVENT_FRAMERATE_CHANGE;
 	else
 		return VSTRM_EVENT_NONE;
 }
@@ -104,6 +106,8 @@ const char *vstrm_event_to_str(enum vstrm_event event)
 		return "RESOLUTION_CHANGE";
 	case VSTRM_EVENT_PHOTO_TRIGGER:
 		return "PHOTO_TRIGGER";
+	case VSTRM_EVENT_FRAMERATE_CHANGE:
+		return "FRAMERATE_CHANGE";
 	case VSTRM_EVENT_NONE:
 	default:
 		return "NONE";
