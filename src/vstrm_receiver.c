@@ -697,9 +697,10 @@ static void vstrm_receiver_recv_frame_cb(struct vstrm_rtp_h264_rx *rtp_h264_rx,
 }
 
 
-static void vstrm_receiver_init_seq(struct vstrm_receiver *self, uint16_t seq)
+static void
+vstrm_receiver_init_seq(struct vstrm_receiver *self, uint16_t seq, bool keep_ps)
 {
-	ULOGI("receiver: init_seq: seq=%d", seq);
+	ULOGI("receiver: init_seq: seq=%d (keep_ps: %d)", seq, keep_ps);
 
 	self->source.base_seq = seq;
 	self->source.max_seq = seq;
@@ -711,7 +712,7 @@ static void vstrm_receiver_init_seq(struct vstrm_receiver *self, uint16_t seq)
 
 	/* Clear jitter buffer and depayloader */
 	rtp_jitter_clear(self->source.rtp_jitter, seq);
-	vstrm_rtp_h264_rx_clear(self->rtp_h264);
+	vstrm_rtp_h264_rx_clear(self->rtp_h264, keep_ps);
 	if (self->source.ssrc == self->codec_info_ssrc) {
 		vstrm_rtp_h264_rx_set_codec_info(self->rtp_h264,
 						 &self->codec_info);
@@ -724,7 +725,7 @@ static int vstrm_receiver_update_seq(struct vstrm_receiver *self, uint16_t seq)
 	uint16_t udelta = seq - self->source.max_seq;
 
 	if (self->resync_needed) {
-		vstrm_receiver_init_seq(self, seq);
+		vstrm_receiver_init_seq(self, seq, true);
 		self->resync_needed = false;
 		return 1;
 	}
@@ -737,7 +738,7 @@ static int vstrm_receiver_update_seq(struct vstrm_receiver *self, uint16_t seq)
 			self->source.probation--;
 			self->source.max_seq = seq;
 			if (self->source.probation == 0) {
-				vstrm_receiver_init_seq(self, seq);
+				vstrm_receiver_init_seq(self, seq, false);
 				self->source.received++;
 				return 1;
 			}
@@ -759,7 +760,7 @@ static int vstrm_receiver_update_seq(struct vstrm_receiver *self, uint16_t seq)
 			/* Two sequential packets -- assume that the other
 			 * side restarted without telling us so just re-sync
 			 * (i.e., pretend this was the first packet) */
-			vstrm_receiver_init_seq(self, seq);
+			vstrm_receiver_init_seq(self, seq, false);
 		} else {
 			self->source.bad_seq = (seq + 1) & (RTP_SEQ_MOD - 1);
 			return 0;
@@ -878,7 +879,7 @@ static void vstrm_receiver_init_source(struct vstrm_receiver *self,
 
 	vstrm_receiver_create_dbg_files(self);
 	vstrm_clock_delta_init(&self->source.clock_delta_ctx);
-	vstrm_receiver_init_seq(self, seq);
+	vstrm_receiver_init_seq(self, seq, false);
 }
 
 

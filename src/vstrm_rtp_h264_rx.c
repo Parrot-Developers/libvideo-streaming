@@ -2587,7 +2587,7 @@ int vstrm_rtp_h264_rx_destroy(struct vstrm_rtp_h264_rx *self)
 }
 
 
-int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
+int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self, bool keep_ps)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 
@@ -2596,14 +2596,20 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
 	self->max_num_ref_logged = false;
 	self->max_num_rplm_logged = false;
 
-	memset(&self->codec_info, 0, sizeof(self->codec_info));
-	self->codec_info.codec = VSTRM_CODEC_VIDEO_H264;
-	self->sps.valid = false;
-	self->sps.mb_width = 0;
-	self->sps.mb_height = 0;
-	self->sps.mb_total = 0;
-	self->pps.valid = false;
+	if (!keep_ps) {
+		memset(&self->codec_info, 0, sizeof(self->codec_info));
+		self->codec_info.codec = VSTRM_CODEC_VIDEO_H264;
+		self->sps.valid = false;
+		self->sps.mb_width = 0;
+		self->sps.mb_height = 0;
+		self->sps.mb_total = 0;
+		self->pps.valid = false;
+	}
 
+	if (self->nalu.buf != NULL) {
+		pomp_buffer_unref(self->nalu.buf);
+		self->nalu.buf = NULL;
+	}
 	if (self->metadata.meta) {
 		vmeta_frame_unref(self->metadata.meta);
 		self->metadata.meta = NULL;
@@ -2612,8 +2618,13 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
 	self->metadata.pack_bf_high = UINT64_C(0);
 	self->metadata.len = 0;
 
-	ref_clear(self);
-	dot_clear(self);
+	if (!keep_ps) {
+		ref_clear(self);
+		dot_clear(self);
+	} else {
+		ref_init(self);
+		dot_init(self);
+	}
 
 	memset(&self->current_timestamps, 0, sizeof(self->current_timestamps));
 	memset(&self->last_timestamps, 0, sizeof(self->last_timestamps));
@@ -2631,7 +2642,9 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self)
 	self->nalu.idr = false;
 
 	self->slice.valid = false;
+	memset(&self->slice, 0, sizeof(self->slice));
 	self->prev_slice.valid = false;
+	memset(&self->prev_slice, 0, sizeof(self->prev_slice));
 
 	self->info_v1.valid = false;
 	self->info_v2.valid = false;

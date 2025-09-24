@@ -291,11 +291,26 @@ out:
 }
 
 
+static bool is_nalu_aggregable(enum h264_nalu_type nalu_type)
+{
+	switch (nalu_type) {
+	case H264_NALU_TYPE_SEI:
+	case H264_NALU_TYPE_SPS:
+	case H264_NALU_TYPE_PPS:
+	case H264_NALU_TYPE_AUD:
+		return true;
+	default:
+		return false;
+	}
+}
+
+
 static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 				      struct vstrm_frame_nalu *nalu)
 {
 	int res = 0;
 	size_t max_size = self->cfg.dyn.target_packet_size;
+	enum h264_nalu_type nalu_type = *(nalu->cdata) & 0x1f;
 
 	/* Can we put this nalu in current payload? */
 	if (self->pkt != NULL && self->pos + 2 + nalu->len < max_size) {
@@ -310,6 +325,10 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 			self->pkt->priority = nalu->priority;
 		if (nalu->importance < self->pkt->importance)
 			self->pkt->importance = nalu->importance;
+		if (nalu_type == H264_NALU_TYPE_SLICE) {
+			self->stats.stap_packet_count++;
+			vstrm_rtp_h264_tx_end_pkt(self);
+		}
 		return 0;
 	}
 
@@ -322,7 +341,8 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 		self, nalu->priority, nalu->importance));
 
 	if (self->pos + nalu->len < 3 * max_size / 4 &&
-	    self->pos + nalu->len + 3 < max_size) {
+	    self->pos + nalu->len + 3 < max_size &&
+	    is_nalu_aggregable(nalu_type)) {
 		/* Aggregation */
 		uint16_t len = htons(nalu->len);
 		uint8_t stap_ind = VSTRM_RTP_H264_NALU_TYPE_STAP_A;

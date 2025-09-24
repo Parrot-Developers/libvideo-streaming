@@ -98,7 +98,7 @@ int vstrm_rtp_h264_rx_new(const struct vstrm_rtp_h264_rx_cfg *cfg,
 int vstrm_rtp_h264_rx_destroy(struct vstrm_rtp_h264_rx *self);
 
 
-int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self);
+int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self, bool keep_ps);
 
 
 int vstrm_rtp_h264_rx_process_packet(struct vstrm_rtp_h264_rx *self,
