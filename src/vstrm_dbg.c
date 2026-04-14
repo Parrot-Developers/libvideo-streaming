@@ -89,7 +89,7 @@ void vstrm_dbg_write_raw(FILE *file, const void *buf, size_t count)
 }
 
 
-void vstrm_dbg_write_pomp_buf(FILE *file, struct pomp_buffer *buf)
+void vstrm_dbg_write_pomp_buf(FILE *file, const struct pomp_buffer *buf)
 {
 	const void *cdata = NULL;
 	size_t len = 0;
@@ -111,11 +111,10 @@ void vstrm_dbg_write_codec_info(FILE *file, const struct vstrm_codec_info *info)
 
 void vstrm_dbg_write_frame(FILE *file,
 			   const struct vstrm_codec_info *info,
-			   struct vstrm_frame *frame)
+			   const struct vstrm_frame *frame)
 {
-	size_t i = 0;
 	if (info == NULL || info->codec == VSTRM_CODEC_VIDEO_H264) {
-		for (i = 0; i < frame->nalu_count; i++) {
+		for (size_t i = 0; i < frame->nalu_count; i++) {
 			vstrm_dbg_write_h264_nalu(file,
 						  frame->nalus[i].cdata,
 						  frame->nalus[i].len);

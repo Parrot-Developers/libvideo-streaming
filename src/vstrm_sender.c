@@ -172,7 +172,7 @@ static void vstrm_sender_rtcp_bye_cb(const struct rtcp_pkt_bye *bye,
 
 
 static void vstrm_sender_rtcp_app_clock_delta_cb(struct vstrm_sender *self,
-						 struct pomp_buffer *buf)
+						 const struct pomp_buffer *buf)
 {
 	int res = 0;
 	size_t pos = 0;
@@ -196,7 +196,7 @@ static void vstrm_sender_rtcp_app_clock_delta_cb(struct vstrm_sender *self,
 
 
 static void vstrm_sender_rtcp_app_video_stats_cb(struct vstrm_sender *self,
-						 struct pomp_buffer *buf)
+						 const struct pomp_buffer *buf)
 {
 	int res = 0;
 	size_t pos = 0;
@@ -250,6 +250,8 @@ static void vstrm_sender_rtcp_app_cb(const struct rtcp_pkt_app *app,
 		case VSTRM_RTCP_APP_PACKET_SUBTYPE_VIDEO_STATS:
 			vstrm_sender_rtcp_app_video_stats_cb(self, buf);
 			break;
+		default:
+			break;
 		}
 	}
 
@@ -259,10 +261,11 @@ out:
 }
 
 
-static int vstrm_sender_write_rtcp_sender_report(struct vstrm_sender *self,
-						 struct pomp_buffer *buf,
-						 size_t *pos,
-						 uint64_t cur_timestamp)
+static int
+vstrm_sender_write_rtcp_sender_report(const struct vstrm_sender *self,
+				      struct pomp_buffer *buf,
+				      size_t *pos,
+				      uint64_t cur_timestamp)
 {
 	int res = 0;
 	struct rtcp_pkt_sender_report sr;
@@ -279,7 +282,8 @@ static int vstrm_sender_write_rtcp_sender_report(struct vstrm_sender *self,
 	if (diff > 0)
 		diff = rtp_timestamp_from_us(diff, VSTRM_RTP_H264_CLK_RATE);
 	else
-		diff = -rtp_timestamp_from_us(-diff, VSTRM_RTP_H264_CLK_RATE);
+		diff = -(int64_t)rtp_timestamp_from_us(-diff,
+						       VSTRM_RTP_H264_CLK_RATE);
 	sr.rtp_timestamp = self->last_rtp_timestamp + diff;
 
 	/* Count of packets/bytes sent */
@@ -295,12 +299,14 @@ static int vstrm_sender_write_rtcp_sender_report(struct vstrm_sender *self,
 }
 
 
-static int vstrm_sender_write_rtcp_sdes(struct vstrm_sender *self,
+static int vstrm_sender_write_rtcp_sdes(const struct vstrm_sender *self,
 					struct pomp_buffer *buf,
 					size_t *pos,
 					int full,
 					uint64_t cur_timestamp)
 {
+	UNUSED(cur_timestamp);
+
 	int res = 0;
 	struct rtcp_pkt_sdes sdes;
 	struct rtcp_pkt_sdes_chunk chunk;
@@ -315,15 +321,21 @@ static int vstrm_sender_write_rtcp_sdes(struct vstrm_sender *self,
 		memset(&sdes, 0, sizeof(sdes));
 		memset(&chunk, 0, sizeof(chunk));
 		memset(&item, 0, sizeof(item));
+
+		const char *serial =
+			(const char *)
+				self->session_metadata_self->serial_number;
+		size_t max_len =
+			sizeof(self->session_metadata_self->serial_number);
+
 		sdes.chunk_count = 1;
 		sdes.chunks = &chunk;
 		chunk.ssrc = self->ssrc;
 		chunk.item_count = 1;
 		chunk.items = &item;
 		item.type = RTCP_PKT_SDES_TYPE_CNAME;
-		item.data = (const uint8_t *)
-				    self->session_metadata_self->serial_number;
-		item.data_len = strlen((const char *)item.data);
+		item.data = (const uint8_t *)serial;
+		item.data_len = strnlen(serial, max_len);
 		res = rtcp_pkt_write_sdes(buf, pos, &sdes);
 	}
 
@@ -387,7 +399,7 @@ out:
 }
 
 
-static int vstrm_sender_write_rtcp_event(struct vstrm_sender *self,
+static int vstrm_sender_write_rtcp_event(const struct vstrm_sender *self,
 					 struct pomp_buffer *buf,
 					 size_t *pos,
 					 enum vstrm_event event)
@@ -434,7 +446,7 @@ out:
 }
 
 
-static int vstrm_sender_write_rtcp_goodbye(struct vstrm_sender *self,
+static int vstrm_sender_write_rtcp_goodbye(const struct vstrm_sender *self,
 					   struct pomp_buffer *buf,
 					   size_t *pos,
 					   const char *reason)
@@ -447,9 +459,12 @@ static int vstrm_sender_write_rtcp_goodbye(struct vstrm_sender *self,
 	bye.sources[0] = self->ssrc;
 
 	/* Reason */
-	if ((reason) && (strlen(reason) > 0)) {
-		bye.reason_len = strlen(reason);
-		bye.reason = (const uint8_t *)reason;
+	if (reason && (strlen(reason) > 0)) {
+		size_t len = strnlen(reason, RTCP_PKT_BYE_REASON_MAX_LEN);
+		if (len > 0) {
+			bye.reason_len = (uint8_t)len;
+			bye.reason = (const uint8_t *)reason;
+		}
 	}
 
 	/* Write in packet */
@@ -472,7 +487,8 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 	uint64_t cur_timestamp = 0;
 	struct pomp_buffer *buf = NULL;
 	struct tpkt_packet *pkt = NULL;
-	size_t pos = 0, len = 0;
+	size_t pos = 0;
+	size_t len = 0;
 	int full_sdes;
 
 	/* Nothing to do if we did not send at least one RTP packet */
@@ -517,7 +533,7 @@ static int vstrm_sender_write_rtcp(struct vstrm_sender *self,
 	}
 
 	if (((self->cfg.flags & VSTRM_SENDER_FLAGS_ENABLE_RTCP_EXT) != 0) &&
-	    (send_event)) {
+	    send_event) {
 		res = vstrm_sender_write_rtcp_event(self, buf, &pos, event);
 		if (res < 0)
 			goto out;
@@ -567,6 +583,8 @@ out:
 
 static void vstrm_sender_rtcp_timer_cb(struct pomp_timer *timer, void *userdata)
 {
+	UNUSED(timer);
+
 	struct vstrm_sender *self = userdata;
 	vstrm_sender_write_rtcp(self, 0, NULL, 0, VSTRM_EVENT_NONE);
 }
@@ -961,7 +979,8 @@ int vstrm_sender_send_frame(struct vstrm_sender *self,
 	uint64_t cur_timestamp = 0;
 	uint32_t rtp_timestamp = 0;
 	uint64_t ntp_timestamp = 0;
-	uint64_t out_timestamp1 = 0, out_timestamp2 = 0;
+	uint64_t out_timestamp1 = 0;
+	uint64_t out_timestamp2 = 0;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(frame == NULL, EINVAL);
@@ -1096,6 +1115,17 @@ int vstrm_sender_send_goodbye(struct vstrm_sender *self, const char *reason)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 
+	if (reason != NULL) {
+		size_t len = strnlen(reason,
+				     (size_t)RTCP_PKT_BYE_REASON_MAX_LEN + 1);
+		if (len > RTCP_PKT_BYE_REASON_MAX_LEN) {
+			ULOGE("goodbye reason too long (max %d) "
+			      "or not null-terminated",
+			      RTCP_PKT_BYE_REASON_MAX_LEN);
+			return -EINVAL;
+		}
+	}
+
 	return vstrm_sender_write_rtcp(self, 1, reason, 0, VSTRM_EVENT_NONE);
 }
 
@@ -1112,7 +1142,7 @@ int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt)
 {
 	int res = 0;
 	struct vmeta_session old_session_metadata_peer;
-	struct pomp_buffer *buf;
+	const struct pomp_buffer *buf;
 	size_t len = 0;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1137,9 +1167,8 @@ int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt)
 
 	/* Check if peer session metadata has changed */
 	if (self->cbs.session_metadata_peer_changed != NULL &&
-	    memcmp(&old_session_metadata_peer,
-		   &self->session_metadata_peer,
-		   sizeof(old_session_metadata_peer)) != 0) {
+	    !vmeta_session_cmp(&old_session_metadata_peer,
+			       &self->session_metadata_peer)) {
 		(*self->cbs.session_metadata_peer_changed)(
 			self, &self->session_metadata_peer, self->cbs_userdata);
 	}
@@ -1159,7 +1188,7 @@ int vstrm_sender_notify_send_data_ready(struct vstrm_sender *self)
 }
 
 
-int vstrm_sender_get_cfg_dyn(struct vstrm_sender *self,
+int vstrm_sender_get_cfg_dyn(const struct vstrm_sender *self,
 			     struct vstrm_sender_cfg_dyn *cfg_dyn)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1191,7 +1220,7 @@ int vstrm_sender_set_cfg_dyn(struct vstrm_sender *self,
 }
 
 
-int vstrm_sender_get_next_frame_params(struct vstrm_sender *self,
+int vstrm_sender_get_next_frame_params(const struct vstrm_sender *self,
 				       uint64_t timestamp,
 				       uint16_t *seq,
 				       uint32_t *rtpts)
@@ -1216,7 +1245,7 @@ int vstrm_sender_get_next_frame_params(struct vstrm_sender *self,
 }
 
 
-int vstrm_sender_get_ssrc_self(struct vstrm_sender *self, uint32_t *ssrc)
+int vstrm_sender_get_ssrc_self(const struct vstrm_sender *self, uint32_t *ssrc)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(ssrc == NULL, EINVAL);
@@ -1226,7 +1255,7 @@ int vstrm_sender_get_ssrc_self(struct vstrm_sender *self, uint32_t *ssrc)
 }
 
 
-int vstrm_sender_get_ssrc_peer(struct vstrm_sender *self, uint32_t *ssrc)
+int vstrm_sender_get_ssrc_peer(const struct vstrm_sender *self, uint32_t *ssrc)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(ssrc == NULL, EINVAL);
@@ -1236,7 +1265,7 @@ int vstrm_sender_get_ssrc_peer(struct vstrm_sender *self, uint32_t *ssrc)
 }
 
 
-int vstrm_sender_get_stats(struct vstrm_sender *self,
+int vstrm_sender_get_stats(const struct vstrm_sender *self,
 			   struct vstrm_sender_stats *stats)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1263,7 +1292,7 @@ int vstrm_sender_set_session_metadata_self(struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(meta == NULL, EINVAL);
 
-	if (memcmp(meta, self->session_metadata_self, sizeof(*meta)) == 0)
+	if (vmeta_session_cmp(meta, self->session_metadata_self))
 		return 0;
 
 	*self->session_metadata_self = *meta;
@@ -1272,7 +1301,7 @@ int vstrm_sender_set_session_metadata_self(struct vstrm_sender *self,
 }
 
 
-int vstrm_sender_get_session_metadata_self(struct vstrm_sender *self,
+int vstrm_sender_get_session_metadata_self(const struct vstrm_sender *self,
 					   const struct vmeta_session **meta)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1283,7 +1312,7 @@ int vstrm_sender_get_session_metadata_self(struct vstrm_sender *self,
 }
 
 
-int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
+int vstrm_sender_get_session_metadata_peer(const struct vstrm_sender *self,
 					   const struct vmeta_session **meta)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1293,7 +1322,7 @@ int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
 	return 0;
 }
 
-int vstrm_sender_get_clock_delta(struct vstrm_sender *self,
+int vstrm_sender_get_clock_delta(const struct vstrm_sender *self,
 				 int64_t *delta,
 				 uint32_t *precision)
 {

@@ -81,7 +81,7 @@ out:
 }
 
 
-static int video_stats_read_v1(struct pomp_buffer *buf,
+static int video_stats_read_v1(const struct pomp_buffer *buf,
 			       size_t *pos,
 			       struct vstrm_video_stats *meta,
 			       struct vstrm_video_stats_dyn *dyn)
@@ -215,7 +215,7 @@ out:
 }
 
 
-static int video_stats_read_v2(struct pomp_buffer *buf,
+static int video_stats_read_v2(const struct pomp_buffer *buf,
 			       size_t *pos,
 			       struct vstrm_video_stats *meta,
 			       struct vstrm_video_stats_dyn *dyn)
@@ -337,7 +337,7 @@ int vstrm_video_stats_write(struct pomp_buffer *buf,
 }
 
 
-int vstrm_video_stats_read(struct pomp_buffer *buf,
+int vstrm_video_stats_read(const struct pomp_buffer *buf,
 			   size_t *pos,
 			   struct vstrm_video_stats *meta,
 			   struct vstrm_video_stats_dyn *dyn)
@@ -439,7 +439,7 @@ static void video_stats_csv_header_v1(FILE *csv,
 				      uint32_t mb_status_class_count,
 				      uint32_t mb_status_zone_count)
 {
-	uint32_t i, j;
+	uint32_t i;
 
 	fprintf(csv,
 		"timestamp rssi totalFrameCount "
@@ -451,7 +451,7 @@ static void video_stats_csv_header_v1(FILE *csv,
 		"erroredSecondCount");
 	for (i = 0; i < mb_status_zone_count; i++)
 		fprintf(csv, " erroredSecondCountByZone[%d]", i);
-	for (j = 0; j < mb_status_class_count; j++) {
+	for (uint32_t j = 0; j < mb_status_class_count; j++) {
 		for (i = 0; i < mb_status_zone_count; i++)
 			fprintf(csv, " macroblockStatus[%d][%d]", j, i);
 	}
@@ -463,7 +463,7 @@ static void video_stats_csv_write_v1(FILE *csv,
 				     const struct vstrm_video_stats *meta,
 				     const struct vstrm_video_stats_dyn *dyn)
 {
-	uint32_t i, j;
+	uint32_t i;
 
 	fprintf(csv,
 		"%" PRIu64 " %i %" PRIu32 " %" PRIu32 " %" PRIu32 " %" PRIu32
@@ -485,7 +485,7 @@ static void video_stats_csv_write_v1(FILE *csv,
 		meta->v1.errored_second_count);
 	for (i = 0; i < meta->mb_status_zone_count; i++)
 		fprintf(csv, " %" PRIu32, dyn->errored_second_count_by_zone[i]);
-	for (j = 0; j < meta->mb_status_class_count; j++) {
+	for (uint32_t j = 0; j < meta->mb_status_class_count; j++) {
 		for (i = 0; i < meta->mb_status_zone_count; i++) {
 			uint32_t k = j * meta->mb_status_zone_count + i;
 			fprintf(csv, " %" PRIu32, dyn->macroblock_status[k]);
@@ -499,7 +499,7 @@ static void video_stats_csv_header_v2(FILE *csv,
 				      uint32_t mb_status_class_count,
 				      uint32_t mb_status_zone_count)
 {
-	uint32_t i, j;
+	uint32_t i;
 
 	fprintf(csv,
 		"timestamp totalFrameCount outputFrameCount "
@@ -516,7 +516,7 @@ static void video_stats_csv_header_v2(FILE *csv,
 		"estimatedLatencyPrecisionIntegral");
 	for (i = 0; i < mb_status_zone_count; i++)
 		fprintf(csv, " erroredSecondCountByZone[%d]", i);
-	for (j = 0; j < mb_status_class_count; j++) {
+	for (uint32_t j = 0; j < mb_status_class_count; j++) {
 		for (i = 0; i < mb_status_zone_count; i++)
 			fprintf(csv, " macroblockStatus[%d][%d]", j, i);
 	}
@@ -528,7 +528,7 @@ static void video_stats_csv_write_v2(FILE *csv,
 				     const struct vstrm_video_stats *meta,
 				     const struct vstrm_video_stats_dyn *dyn)
 {
-	uint32_t i, j;
+	uint32_t i;
 
 	fprintf(csv,
 		"%" PRIu64 " %" PRIu32 " %" PRIu32 " %" PRIu32 " %" PRIu32
@@ -554,7 +554,7 @@ static void video_stats_csv_write_v2(FILE *csv,
 		meta->v2.estimated_latency_precision_integral);
 	for (i = 0; i < meta->mb_status_zone_count; i++)
 		fprintf(csv, " %" PRIu32, dyn->errored_second_count_by_zone[i]);
-	for (j = 0; j < meta->mb_status_class_count; j++) {
+	for (uint32_t j = 0; j < meta->mb_status_class_count; j++) {
 		for (i = 0; i < meta->mb_status_zone_count; i++) {
 			uint32_t k = j * meta->mb_status_zone_count + i;
 			fprintf(csv, " %" PRIu32, dyn->macroblock_status[k]);

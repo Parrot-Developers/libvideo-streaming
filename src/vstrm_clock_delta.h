@@ -66,7 +66,7 @@ int vstrm_clock_delta_write(struct pomp_buffer *buf,
 			    const struct vstrm_clock_delta *meta);
 
 
-int vstrm_clock_delta_read(struct pomp_buffer *buf,
+int vstrm_clock_delta_read(const struct pomp_buffer *buf,
 			   size_t *pos,
 			   struct vstrm_clock_delta *meta);
 

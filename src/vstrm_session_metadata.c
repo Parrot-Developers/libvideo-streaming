@@ -31,7 +31,7 @@
 
 
 #define ADD_ITEM(_type, _data)                                                 \
-	{                                                                      \
+	do {                                                                   \
 		if (chunk->item_count < VSTRM_SDES_ITEMS_MAX_COUNT) {          \
 			struct rtcp_pkt_sdes_item *item =                      \
 				&items[chunk->item_count];                     \
@@ -42,11 +42,11 @@
 		} else {                                                       \
 			ULOGW("max SDES items count has been reached");        \
 		}                                                              \
-	}
+	} while (0)
 
 
 #define ADD_PRIV_ITEM(_prefix, _value)                                         \
-	{                                                                      \
+	do {                                                                   \
 		if (chunk->item_count < VSTRM_SDES_ITEMS_MAX_COUNT) {          \
 			struct rtcp_pkt_sdes_item *item =                      \
 				&items[chunk->item_count];                     \
@@ -59,7 +59,7 @@
 		} else {                                                       \
 			ULOGW("max SDES items count has been reached");        \
 		}                                                              \
-	}
+	} while (0)
 
 
 static void vstrm_session_metadata_write_cb(enum vmeta_stream_sdes_type type,
@@ -67,7 +67,7 @@ static void vstrm_session_metadata_write_cb(enum vmeta_stream_sdes_type type,
 					    const char *prefix,
 					    void *userdata)
 {
-	struct rtcp_pkt_sdes *sdes = (struct rtcp_pkt_sdes *)userdata;
+	const struct rtcp_pkt_sdes *sdes = (struct rtcp_pkt_sdes *)userdata;
 	if (sdes == NULL)
 		return;
 
@@ -121,7 +121,6 @@ int vstrm_session_metadata_write_rtcp_sdes(struct pomp_buffer *buf,
 					   const struct vmeta_session *meta)
 {
 	int res = 0;
-	unsigned int i;
 	struct rtcp_pkt_sdes sdes;
 	struct rtcp_pkt_sdes_chunk chunk;
 	struct rtcp_pkt_sdes_item *items = NULL;
@@ -149,7 +148,7 @@ int vstrm_session_metadata_write_rtcp_sdes(struct pomp_buffer *buf,
 	if (res < 0)
 		ULOG_ERRNO("rtcp_pkt_write_sdes", -res);
 
-	for (i = 0; i < chunk.item_count; i++) {
+	for (unsigned int i = 0; i < chunk.item_count; i++) {
 		if (chunk.items[i].type == RTCP_PKT_SDES_TYPE_PRIV) {
 			free((void *)chunk.items[i].priv.prefix);
 			free((void *)chunk.items[i].priv.value);
@@ -164,17 +163,17 @@ int vstrm_session_metadata_write_rtcp_sdes(struct pomp_buffer *buf,
 
 
 #define COPY_ITEM(_field)                                                      \
-	{                                                                      \
+	do {                                                                   \
 		strncpy(_field,                                                \
 			(const char *)item->data,                              \
 			item->data_len < sizeof(_field) ? item->data_len       \
 							: sizeof(_field));     \
 		_field[sizeof(_field) - 1] = '\0';                             \
-	}
+	} while (0)
 
 
 #define COPY_PRIV_ITEM(_prefix, _value)                                        \
-	{                                                                      \
+	do {                                                                   \
 		strncpy(_prefix,                                               \
 			(const char *)item->priv.prefix,                       \
 			item->priv.prefix_len < sizeof(_prefix)                \
@@ -187,7 +186,7 @@ int vstrm_session_metadata_write_rtcp_sdes(struct pomp_buffer *buf,
 				? item->priv.value_len                         \
 				: sizeof(_value));                             \
 		_value[sizeof(_value) - 1] = '\0';                             \
-	}
+	} while (0)
 
 
 int vstrm_session_metadata_read_rtcp_sdes(const struct rtcp_pkt_sdes_item *item,

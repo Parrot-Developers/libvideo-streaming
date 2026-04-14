@@ -99,7 +99,6 @@ int vstrm_h264_sei_streaming_v1_write(
 	uint8_t *buf,
 	size_t *len)
 {
-	uint32_t i = 0;
 
 	ULOG_ERRNO_RETURN_ERR_IF(sei == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
@@ -124,7 +123,7 @@ int vstrm_h264_sei_streaming_v1_write(
 
 	buf[0] = sei->index_in_gop;
 	buf[1] = sei->slice_count;
-	for (i = 0; i < sei->slice_count; i++) {
+	for (uint32_t i = 0; i < sei->slice_count; i++) {
 		buf[2 * i + 2] = (sei->slice_mb_count[i] >> 8) & 0xff;
 		buf[2 * i + 3] = sei->slice_mb_count[i] & 0xff;
 	}
@@ -139,8 +138,6 @@ int vstrm_h264_sei_streaming_v1_read(struct vstrm_h264_sei_streaming_v1 *sei,
 				     const uint8_t *buf,
 				     size_t len)
 {
-	uint32_t i = 0;
-
 	ULOG_ERRNO_RETURN_ERR_IF(sei == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(uuid == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
@@ -162,7 +159,7 @@ int vstrm_h264_sei_streaming_v1_read(struct vstrm_h264_sei_streaming_v1 *sei,
 
 	if (len < sz)
 		return -EIO;
-	for (i = 0; i < sei->slice_count; i++)
+	for (uint32_t i = 0; i < sei->slice_count; i++)
 		sei->slice_mb_count[i] = (buf[2 * i + 2] << 8) | buf[2 * i + 3];
 
 	return 0;

@@ -34,7 +34,7 @@ int vstrm_video_stats_write(struct pomp_buffer *buf,
 			    const struct vstrm_video_stats_dyn *dyn);
 
 
-int vstrm_video_stats_read(struct pomp_buffer *buf,
+int vstrm_video_stats_read(const struct pomp_buffer *buf,
 			   size_t *pos,
 			   struct vstrm_video_stats *meta,
 			   struct vstrm_video_stats_dyn *dyn);

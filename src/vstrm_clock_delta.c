@@ -50,7 +50,7 @@ out:
 }
 
 
-int vstrm_clock_delta_read(struct pomp_buffer *buf,
+int vstrm_clock_delta_read(const struct pomp_buffer *buf,
 			   size_t *pos,
 			   struct vstrm_clock_delta *delta)
 {
@@ -98,8 +98,11 @@ int vstrm_clock_delta_process(struct vstrm_clock_delta_ctx *ctx,
 			      const struct vstrm_clock_delta *delta,
 			      uint64_t receive_ts)
 {
-	uint64_t originate_ts, peer_receive_ts, peer_transmit_ts;
-	int64_t rt_delay, clock_delta;
+	uint64_t originate_ts;
+	uint64_t peer_receive_ts;
+	uint64_t peer_transmit_ts;
+	int64_t rt_delay;
+	int64_t clock_delta;
 
 	ULOG_ERRNO_RETURN_ERR_IF(ctx == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(delta == NULL, EINVAL);

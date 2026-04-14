@@ -269,7 +269,8 @@ uint64_t vstrm_receiver_get_ntp_from_rtp_ts(struct vstrm_receiver *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_ssrc_self(struct vstrm_receiver *self, uint32_t *ssrc);
+int vstrm_receiver_get_ssrc_self(const struct vstrm_receiver *self,
+				 uint32_t *ssrc);
 
 
 /**
@@ -279,7 +280,8 @@ int vstrm_receiver_get_ssrc_self(struct vstrm_receiver *self, uint32_t *ssrc);
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_ssrc_peer(struct vstrm_receiver *self, uint32_t *ssrc);
+int vstrm_receiver_get_ssrc_peer(const struct vstrm_receiver *self,
+				 uint32_t *ssrc);
 
 
 /**
@@ -290,7 +292,7 @@ int vstrm_receiver_get_ssrc_peer(struct vstrm_receiver *self, uint32_t *ssrc);
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_stats(struct vstrm_receiver *self,
+int vstrm_receiver_get_stats(const struct vstrm_receiver *self,
 			     struct vstrm_receiver_stats *stats);
 
 
@@ -316,7 +318,7 @@ int vstrm_receiver_set_session_metadata_self(struct vstrm_receiver *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_session_metadata_self(struct vstrm_receiver *self,
+int vstrm_receiver_get_session_metadata_self(const struct vstrm_receiver *self,
 					     const struct vmeta_session **meta);
 
 
@@ -328,7 +330,7 @@ int vstrm_receiver_get_session_metadata_self(struct vstrm_receiver *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
+int vstrm_receiver_get_session_metadata_peer(const struct vstrm_receiver *self,
 					     const struct vmeta_session **meta);
 
 
@@ -343,7 +345,7 @@ int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_receiver_get_clock_delta(struct vstrm_receiver *self,
+int vstrm_receiver_get_clock_delta(const struct vstrm_receiver *self,
 				   int64_t *delta,
 				   uint32_t *precision);
 

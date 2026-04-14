@@ -57,6 +57,9 @@
 #include <video-streaming/vstrm.h>
 
 
+#define UNUSED(x) (void)(x)
+
+
 #define DEFAULT_RCVBUF_SIZE 4096
 #define DEFAULT_SNDBUF_SIZE 4096
 #define DEFAULT_RX_BUFFER_SIZE 65536

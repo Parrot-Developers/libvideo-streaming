@@ -63,6 +63,10 @@ struct vstrm_timestamp;
 #include "vstrm_rtp_h264.h"
 #include "vstrm_video_stats_priv.h"
 
+
+#define UNUSED(x) (void)(x)
+
+
 #define VSTRM_H264_MB_STATUS_CLASS_COUNT 7
 #define VSTRM_H264_MB_STATUS_ZONE_COUNT 5
 
@@ -134,7 +138,7 @@ FILE *vstrm_dbg_create_file(const char *dir,
 void vstrm_dbg_write_raw(FILE *file, const void *buf, size_t count);
 
 
-void vstrm_dbg_write_pomp_buf(FILE *file, struct pomp_buffer *buf);
+void vstrm_dbg_write_pomp_buf(FILE *file, const struct pomp_buffer *buf);
 
 
 void vstrm_dbg_write_codec_info(FILE *file,
@@ -143,7 +147,7 @@ void vstrm_dbg_write_codec_info(FILE *file,
 
 void vstrm_dbg_write_frame(FILE *file,
 			   const struct vstrm_codec_info *info,
-			   struct vstrm_frame *frame);
+			   const struct vstrm_frame *frame);
 
 
 static inline int
@@ -212,20 +216,21 @@ vstrm_write_i64(struct pomp_buffer *buf, size_t *pos, int64_t v)
 
 
 static inline int
-vstrm_read_u8(struct pomp_buffer *buf, size_t *pos, uint8_t *v)
-{
-	return pomp_buffer_read(buf, pos, v, sizeof(*v));
-}
-
-
-static inline int vstrm_read_i8(struct pomp_buffer *buf, size_t *pos, int8_t *v)
+vstrm_read_u8(const struct pomp_buffer *buf, size_t *pos, uint8_t *v)
 {
 	return pomp_buffer_read(buf, pos, v, sizeof(*v));
 }
 
 
 static inline int
-vstrm_read_u16(struct pomp_buffer *buf, size_t *pos, uint16_t *v)
+vstrm_read_i8(const struct pomp_buffer *buf, size_t *pos, int8_t *v)
+{
+	return pomp_buffer_read(buf, pos, v, sizeof(*v));
+}
+
+
+static inline int
+vstrm_read_u16(const struct pomp_buffer *buf, size_t *pos, uint16_t *v)
 {
 	int res = 0;
 	res = pomp_buffer_read(buf, pos, v, sizeof(*v));
@@ -236,7 +241,7 @@ vstrm_read_u16(struct pomp_buffer *buf, size_t *pos, uint16_t *v)
 
 
 static inline int
-vstrm_read_i16(struct pomp_buffer *buf, size_t *pos, int16_t *v)
+vstrm_read_i16(const struct pomp_buffer *buf, size_t *pos, int16_t *v)
 {
 	int res = 0;
 	res = pomp_buffer_read(buf, pos, v, sizeof(*v));
@@ -247,7 +252,7 @@ vstrm_read_i16(struct pomp_buffer *buf, size_t *pos, int16_t *v)
 
 
 static inline int
-vstrm_read_u32(struct pomp_buffer *buf, size_t *pos, uint32_t *v)
+vstrm_read_u32(const struct pomp_buffer *buf, size_t *pos, uint32_t *v)
 {
 	int res = 0;
 	res = pomp_buffer_read(buf, pos, v, sizeof(*v));
@@ -258,7 +263,7 @@ vstrm_read_u32(struct pomp_buffer *buf, size_t *pos, uint32_t *v)
 
 
 static inline int
-vstrm_read_i32(struct pomp_buffer *buf, size_t *pos, int32_t *v)
+vstrm_read_i32(const struct pomp_buffer *buf, size_t *pos, int32_t *v)
 {
 	int res = 0;
 	res = pomp_buffer_read(buf, pos, v, sizeof(*v));
@@ -269,7 +274,7 @@ vstrm_read_i32(struct pomp_buffer *buf, size_t *pos, int32_t *v)
 
 
 static inline int
-vstrm_read_u64(struct pomp_buffer *buf, size_t *pos, uint64_t *v)
+vstrm_read_u64(const struct pomp_buffer *buf, size_t *pos, uint64_t *v)
 {
 	int res = 0;
 	uint32_t _v[2];
@@ -281,7 +286,7 @@ vstrm_read_u64(struct pomp_buffer *buf, size_t *pos, uint64_t *v)
 
 
 static inline int
-vstrm_read_i64(struct pomp_buffer *buf, size_t *pos, int64_t *v)
+vstrm_read_i64(const struct pomp_buffer *buf, size_t *pos, int64_t *v)
 {
 	int res = 0;
 	uint32_t _v[2];

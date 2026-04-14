@@ -138,24 +138,31 @@ static void usage(char *prog_name)
 
 int main(int argc, char **argv)
 {
-	int res = 0, status = EXIT_SUCCESS;
-	int idx, c;
+	int res = 0;
+	int status = EXIT_SUCCESS;
+	int idx;
+	int c;
 	struct vstrm_test *self = NULL;
 	int receive = 0;
-	char *send_file = NULL, *recv_file = NULL;
+	const char *send_file = NULL;
+	const char *recv_file = NULL;
 	float send_framerate = 0.;
-	char *send_addr = DEFAULT_ADDR;
-	char *recv_addr = DEFAULT_ADDR;
+	const char *send_addr = DEFAULT_ADDR;
+	const char *recv_addr = DEFAULT_ADDR;
 	uint16_t send_data_port = 0;
 	uint16_t send_ctrl_port = 0;
 	uint16_t recv_data_port = DEFAULT_RECV_DATA_PORT;
 	uint16_t recv_ctrl_port = DEFAULT_RECV_CTRL_PORT;
-	uint64_t start_time = 0, end_time = 0;
+	uint64_t start_time = 0;
+	uint64_t end_time = 0;
 	struct vstrm_sender_stats sender_stats;
 	struct vstrm_receiver_stats receiver_stats;
 	struct timespec cur_ts = {0, 0};
-	float time_s, sender_bitrate_mbits, receiver_bitrate_mbits;
-	uint32_t sender_packet_rate, receiver_packet_rate;
+	float time_s;
+	float sender_bitrate_mbits;
+	float receiver_bitrate_mbits;
+	uint32_t sender_packet_rate;
+	uint32_t receiver_packet_rate;
 	memset(&sender_stats, 0, sizeof(sender_stats));
 	memset(&receiver_stats, 0, sizeof(receiver_stats));
 
@@ -287,23 +294,22 @@ int main(int argc, char **argv)
 
 	time_s = (float)(end_time - start_time) / 1000000.;
 	sender_packet_rate =
-		(time_s)
-			? (uint32_t)((uint64_t)sender_stats.total_packet_count *
-				     1000000 / (end_time - start_time))
-			: 0;
+		time_s ? (uint32_t)((uint64_t)sender_stats.total_packet_count *
+				    1000000 / (end_time - start_time))
+		       : 0;
 	sender_bitrate_mbits = (time_s != 0.)
 				       ? (float)sender_stats.total_byte_count *
 						 8. / time_s / 1000000.
 				       : 0;
 	receiver_packet_rate =
-		(time_s) ? (uint32_t)((uint64_t)receiver_stats
-					      .received_packet_count *
-				      1000000 / (end_time - start_time))
-			 : 0;
+		time_s ? (uint32_t)((uint64_t)receiver_stats
+					    .received_packet_count *
+				    1000000 / (end_time - start_time))
+		       : 0;
 	receiver_bitrate_mbits =
-		(time_s != 0.) ? (float)receiver_stats.received_byte_count *
-					 8. / time_s / 1000000.
-			       : 0;
+		time_s != 0. ? (float)receiver_stats.received_byte_count * 8. /
+				       time_s / 1000000.
+			     : 0;
 
 	printf("\nOverall time:     %.2fs\n", time_s);
 	printf("\nOverall sent:     %" PRIu32

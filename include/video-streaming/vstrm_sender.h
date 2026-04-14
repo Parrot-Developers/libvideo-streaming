@@ -350,7 +350,7 @@ int vstrm_sender_notify_send_data_ready(struct vstrm_sender *self);
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_cfg_dyn(struct vstrm_sender *self,
+int vstrm_sender_get_cfg_dyn(const struct vstrm_sender *self,
 			     struct vstrm_sender_cfg_dyn *cfg_dyn);
 
 
@@ -377,7 +377,7 @@ int vstrm_sender_set_cfg_dyn(struct vstrm_sender *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_next_frame_params(struct vstrm_sender *self,
+int vstrm_sender_get_next_frame_params(const struct vstrm_sender *self,
 				       uint64_t timestamp,
 				       uint16_t *seq,
 				       uint32_t *rtpts);
@@ -390,7 +390,7 @@ int vstrm_sender_get_next_frame_params(struct vstrm_sender *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_ssrc_self(struct vstrm_sender *self, uint32_t *ssrc);
+int vstrm_sender_get_ssrc_self(const struct vstrm_sender *self, uint32_t *ssrc);
 
 
 /**
@@ -400,7 +400,7 @@ int vstrm_sender_get_ssrc_self(struct vstrm_sender *self, uint32_t *ssrc);
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_ssrc_peer(struct vstrm_sender *self, uint32_t *ssrc);
+int vstrm_sender_get_ssrc_peer(const struct vstrm_sender *self, uint32_t *ssrc);
 
 
 /**
@@ -411,7 +411,7 @@ int vstrm_sender_get_ssrc_peer(struct vstrm_sender *self, uint32_t *ssrc);
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_stats(struct vstrm_sender *self,
+int vstrm_sender_get_stats(const struct vstrm_sender *self,
 			   struct vstrm_sender_stats *stats);
 
 
@@ -437,7 +437,7 @@ int vstrm_sender_set_session_metadata_self(struct vstrm_sender *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_session_metadata_self(struct vstrm_sender *self,
+int vstrm_sender_get_session_metadata_self(const struct vstrm_sender *self,
 					   const struct vmeta_session **meta);
 
 
@@ -449,7 +449,7 @@ int vstrm_sender_get_session_metadata_self(struct vstrm_sender *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
+int vstrm_sender_get_session_metadata_peer(const struct vstrm_sender *self,
 					   const struct vmeta_session **meta);
 
 
@@ -464,7 +464,7 @@ int vstrm_sender_get_session_metadata_peer(struct vstrm_sender *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_sender_get_clock_delta(struct vstrm_sender *self,
+int vstrm_sender_get_clock_delta(const struct vstrm_sender *self,
 				 int64_t *delta,
 				 uint32_t *precision);
 

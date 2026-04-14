@@ -118,9 +118,12 @@ vstrm_receiver_rtcp_sender_report_cb(const struct rtcp_pkt_sender_report *sr,
 				     void *userdata)
 {
 	struct vstrm_receiver *self = userdata;
-	uint32_t last_rtp_timestamp = 0, rtp_timestamp = 0;
-	uint64_t last_ntp_timestamp = 0, ntp_timestamp = 0;
-	int64_t tsAnum = 0, tsAden = 0;
+	uint32_t last_rtp_timestamp = 0;
+	uint32_t rtp_timestamp = 0;
+	uint64_t last_ntp_timestamp = 0;
+	uint64_t ntp_timestamp = 0;
+	int64_t tsAnum = 0;
+	int64_t tsAden = 0;
 
 	if (sr->ssrc != self->source.ssrc)
 		return;
@@ -168,6 +171,8 @@ vstrm_receiver_rtcp_sdes_item_cb(uint32_t ssrc,
 				 const struct rtcp_pkt_sdes_item *item,
 				 void *userdata)
 {
+	UNUSED(ssrc);
+
 	struct vstrm_receiver *self = userdata;
 	vstrm_session_metadata_read_rtcp_sdes(
 		item, &self->source.session_metadata_peer);
@@ -199,8 +204,9 @@ static void vstrm_receiver_rtcp_bye_cb(const struct rtcp_pkt_bye *bye,
 }
 
 
-static void vstrm_receiver_rtcp_app_clock_delta_cb(struct vstrm_receiver *self,
-						   struct pomp_buffer *buf)
+static void
+vstrm_receiver_rtcp_app_clock_delta_cb(struct vstrm_receiver *self,
+				       const struct pomp_buffer *buf)
 {
 	int res = 0;
 	size_t pos = 0;
@@ -225,7 +231,7 @@ static void vstrm_receiver_rtcp_app_clock_delta_cb(struct vstrm_receiver *self,
 
 
 static void vstrm_receiver_rtcp_app_event_cb(struct vstrm_receiver *self,
-					     struct pomp_buffer *buf)
+					     const struct pomp_buffer *buf)
 {
 	int res = 0;
 	size_t pos = 0;
@@ -262,6 +268,8 @@ static void vstrm_receiver_rtcp_app_cb(const struct rtcp_pkt_app *app,
 		case VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT:
 			vstrm_receiver_rtcp_app_event_cb(self, buf);
 			break;
+		default:
+			break;
 		}
 	}
 
@@ -281,7 +289,8 @@ vstrm_receiver_write_rtcp_receiver_report(struct vstrm_receiver *self,
 	struct rtcp_pkt_receiver_report rr;
 	uint32_t ext_max_seq = 0;
 	uint32_t expected = 0;
-	int32_t lost = 0, lost_interval = 0;
+	int32_t lost = 0;
+	int32_t lost_interval = 0;
 	uint32_t expected_interval = 0;
 	uint32_t received_interval = 0;
 	uint32_t fraction = 0;
@@ -345,12 +354,14 @@ vstrm_receiver_write_rtcp_receiver_report(struct vstrm_receiver *self,
 }
 
 
-static int vstrm_receiver_write_rtcp_sdes(struct vstrm_receiver *self,
+static int vstrm_receiver_write_rtcp_sdes(const struct vstrm_receiver *self,
 					  struct pomp_buffer *buf,
 					  size_t *pos,
 					  int full,
 					  uint64_t cur_timestamp)
 {
+	UNUSED(cur_timestamp);
+
 	int res = 0;
 	struct rtcp_pkt_sdes sdes;
 	struct rtcp_pkt_sdes_chunk chunk;
@@ -365,15 +376,21 @@ static int vstrm_receiver_write_rtcp_sdes(struct vstrm_receiver *self,
 		memset(&sdes, 0, sizeof(sdes));
 		memset(&chunk, 0, sizeof(chunk));
 		memset(&item, 0, sizeof(item));
+
+		const char *serial =
+			(const char *)
+				self->session_metadata_self->serial_number;
+		size_t max_len =
+			sizeof(self->session_metadata_self->serial_number);
+
 		sdes.chunk_count = 1;
 		sdes.chunks = &chunk;
 		chunk.ssrc = self->ssrc;
 		chunk.item_count = 1;
 		chunk.items = &item;
 		item.type = RTCP_PKT_SDES_TYPE_CNAME;
-		item.data = (const uint8_t *)
-				    self->session_metadata_self->serial_number;
-		item.data_len = strlen((const char *)item.data);
+		item.data = (const uint8_t *)serial;
+		item.data_len = strnlen(serial, max_len);
 		res = rtcp_pkt_write_sdes(buf, pos, &sdes);
 	}
 
@@ -442,6 +459,8 @@ static int vstrm_receiver_write_rtcp_video_stats(struct vstrm_receiver *self,
 						 size_t *pos,
 						 uint64_t cur_timestamp)
 {
+	UNUSED(cur_timestamp);
+
 	int res = 0;
 	const struct vstrm_video_stats *video_stats = NULL;
 	const struct vstrm_video_stats_dyn *video_stats_dyn = NULL;
@@ -504,7 +523,7 @@ out:
 }
 
 
-static int vstrm_receiver_write_rtcp_goodbye(struct vstrm_receiver *self,
+static int vstrm_receiver_write_rtcp_goodbye(const struct vstrm_receiver *self,
 					     struct pomp_buffer *buf,
 					     size_t *pos,
 					     const char *reason)
@@ -517,9 +536,12 @@ static int vstrm_receiver_write_rtcp_goodbye(struct vstrm_receiver *self,
 	bye.sources[0] = self->ssrc;
 
 	/* Reason */
-	if ((reason) && (strlen(reason) > 0)) {
-		bye.reason_len = strlen(reason);
-		bye.reason = (const uint8_t *)reason;
+	if (reason) {
+		size_t len = strnlen(reason, RTCP_PKT_BYE_REASON_MAX_LEN);
+		if (len > 0) {
+			bye.reason_len = (uint8_t)len;
+			bye.reason = (const uint8_t *)reason;
+		}
 	}
 
 	/* Write in packet */
@@ -616,6 +638,8 @@ out:
 static void vstrm_receiver_rtcp_timer_cb(struct pomp_timer *timer,
 					 void *userdata)
 {
+	UNUSED(timer);
+
 	struct vstrm_receiver *self = userdata;
 	vstrm_receiver_write_rtcp(self, 0, NULL);
 }
@@ -626,6 +650,8 @@ static void vstrm_receiver_rtp_process_pkt_cb(struct rtp_jitter *jitter,
 					      uint32_t gap,
 					      void *userdata)
 {
+	UNUSED(jitter);
+
 	struct vstrm_receiver *self = userdata;
 	uint32_t clk_rate = 0;
 	int64_t skew_avg = 0;
@@ -646,13 +672,12 @@ static void vstrm_receiver_rtp_process_pkt_cb(struct rtp_jitter *jitter,
 		 * previous sender report */
 		ntp_timestamp64_to_us(&self->source.last_sr.ntp_timestamp,
 				      &last_ntp_timestamp);
-		timestamp.ntp = (uint64_t)(
-			(((int64_t)pkt->rtp_timestamp -
-			  (int64_t)self->source.last_sr.rtp_timestamp) *
-				 self->source.tsAden +
-			 self->source.tsAnum / 2) /
-				self->source.tsAnum +
-			last_ntp_timestamp);
+		timestamp.ntp = (((int64_t)pkt->rtp_timestamp -
+				  (int64_t)self->source.last_sr.rtp_timestamp) *
+					 self->source.tsAden +
+				 self->source.tsAnum / 2) /
+					self->source.tsAnum +
+				last_ntp_timestamp;
 	}
 	timestamp.ntp_unskewed =
 		(timestamp.ntp == 0) ? 0 : timestamp.ntp + skew_avg;
@@ -676,6 +701,8 @@ vstrm_receiver_codec_info_changed_cb(struct vstrm_rtp_h264_rx *rtp_h264_rx,
 				     const struct vstrm_codec_info *info,
 				     void *userdata)
 {
+	UNUSED(rtp_h264_rx);
+
 	struct vstrm_receiver *self = userdata;
 	if (self->dbg.stream != NULL)
 		vstrm_dbg_write_codec_info(self->dbg.stream, info);
@@ -1067,7 +1094,7 @@ int vstrm_receiver_recv_ctrl(struct vstrm_receiver *self,
 {
 	int res = 0;
 	struct vmeta_session old_session_metadata_peer;
-	struct pomp_buffer *buf;
+	const struct pomp_buffer *buf;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
@@ -1120,6 +1147,17 @@ int vstrm_receiver_send_goodbye(struct vstrm_receiver *self, const char *reason)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 
+	if (reason != NULL) {
+		size_t len = strnlen(reason,
+				     (size_t)RTCP_PKT_BYE_REASON_MAX_LEN + 1);
+		if (len > RTCP_PKT_BYE_REASON_MAX_LEN) {
+			ULOGE("goodbye reason too long (max %d) "
+			      "or not null-terminated",
+			      RTCP_PKT_BYE_REASON_MAX_LEN);
+			return -EINVAL;
+		}
+	}
+
 	return vstrm_receiver_write_rtcp(self, 1, reason);
 }
 
@@ -1159,7 +1197,8 @@ uint64_t vstrm_receiver_get_ntp_from_rtp_ts(struct vstrm_receiver *self,
 }
 
 
-int vstrm_receiver_get_ssrc_self(struct vstrm_receiver *self, uint32_t *ssrc)
+int vstrm_receiver_get_ssrc_self(const struct vstrm_receiver *self,
+				 uint32_t *ssrc)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(ssrc == NULL, EINVAL);
@@ -1169,7 +1208,8 @@ int vstrm_receiver_get_ssrc_self(struct vstrm_receiver *self, uint32_t *ssrc)
 }
 
 
-int vstrm_receiver_get_ssrc_peer(struct vstrm_receiver *self, uint32_t *ssrc)
+int vstrm_receiver_get_ssrc_peer(const struct vstrm_receiver *self,
+				 uint32_t *ssrc)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(ssrc == NULL, EINVAL);
@@ -1179,7 +1219,7 @@ int vstrm_receiver_get_ssrc_peer(struct vstrm_receiver *self, uint32_t *ssrc)
 }
 
 
-int vstrm_receiver_get_stats(struct vstrm_receiver *self,
+int vstrm_receiver_get_stats(const struct vstrm_receiver *self,
 			     struct vstrm_receiver_stats *stats)
 {
 	uint32_t ext_max_seq = 0;
@@ -1214,7 +1254,7 @@ int vstrm_receiver_set_session_metadata_self(struct vstrm_receiver *self,
 }
 
 
-int vstrm_receiver_get_session_metadata_self(struct vstrm_receiver *self,
+int vstrm_receiver_get_session_metadata_self(const struct vstrm_receiver *self,
 					     const struct vmeta_session **meta)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1225,7 +1265,7 @@ int vstrm_receiver_get_session_metadata_self(struct vstrm_receiver *self,
 }
 
 
-int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
+int vstrm_receiver_get_session_metadata_peer(const struct vstrm_receiver *self,
 					     const struct vmeta_session **meta)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -1236,7 +1276,7 @@ int vstrm_receiver_get_session_metadata_peer(struct vstrm_receiver *self,
 }
 
 
-int vstrm_receiver_get_clock_delta(struct vstrm_receiver *self,
+int vstrm_receiver_get_clock_delta(const struct vstrm_receiver *self,
 				   int64_t *delta,
 				   uint32_t *precision)
 {

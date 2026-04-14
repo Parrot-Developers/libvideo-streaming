@@ -103,7 +103,9 @@ static int vstrm_rtp_h264_tx_add_proto_metadata(struct vstrm_rtp_h264_tx *self)
 	uint8_t *udata;
 	size_t capacity = 0;
 	int res;
-	uint16_t id, len, offset;
+	uint16_t id;
+	uint16_t len;
+	uint16_t offset;
 	uint8_t padding;
 	size_t packlen;
 	off_t packoff;
@@ -306,7 +308,7 @@ static bool is_nalu_aggregable(enum h264_nalu_type nalu_type)
 
 
 static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
-				      struct vstrm_frame_nalu *nalu)
+				      const struct vstrm_frame_nalu *nalu)
 {
 	int res = 0;
 	size_t max_size = self->cfg.dyn.target_packet_size;
@@ -366,8 +368,10 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 		vstrm_rtp_h264_tx_end_pkt(self);
 	} else {
 		/* Fragmentation */
-		size_t off = 1, len = 0;
-		int start, end = 0;
+		size_t off = 1;
+		size_t len = 0;
+		int start;
+		int end = 0;
 		while ((!end) && (off < nalu->len)) {
 			/* TODO: check overflow */
 			len = max_size - self->pos - 2;
@@ -445,8 +449,8 @@ int vstrm_rtp_h264_tx_process_frame(struct vstrm_rtp_h264_tx *self,
 				    struct list_node *packets)
 {
 	int res = 0;
-	struct vstrm_frame_nalu *nalu = NULL;
-	struct list_node *node = NULL;
+	const struct vstrm_frame_nalu *nalu = NULL;
+	const struct list_node *node = NULL;
 	struct rtp_pkt *pkt = NULL;
 
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
@@ -510,7 +514,7 @@ int vstrm_rtp_h264_tx_set_cfg_dyn(
 }
 
 
-int vstrm_rtp_h264_tx_get_stats(struct vstrm_rtp_h264_tx *self,
+int vstrm_rtp_h264_tx_get_stats(const struct vstrm_rtp_h264_tx *self,
 				struct vstrm_rtp_h264_tx_stats *stats)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);

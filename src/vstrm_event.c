@@ -56,7 +56,7 @@ out:
 }
 
 
-int vstrm_event_read(struct pomp_buffer *buf,
+int vstrm_event_read(const struct pomp_buffer *buf,
 		     size_t *pos,
 		     enum vstrm_event *event)
 {

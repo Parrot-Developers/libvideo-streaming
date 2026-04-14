@@ -33,6 +33,9 @@ ULOG_DECLARE_TAG(vstrm_test_receiver);
 
 static void socket_data_cb(int fd, uint32_t events, void *userdata)
 {
+	UNUSED(fd);
+	UNUSED(events);
+
 	int res;
 	struct vstrm_test_receiver *self = userdata;
 	ssize_t readlen = 0;
@@ -79,6 +82,9 @@ static void socket_data_cb(int fd, uint32_t events, void *userdata)
 
 static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 {
+	UNUSED(fd);
+	UNUSED(events);
+
 	int res;
 	struct vstrm_test_receiver *self = userdata;
 	ssize_t readlen = 0;
@@ -127,6 +133,8 @@ static int send_ctrl_cb(struct vstrm_receiver *stream,
 			struct tpkt_packet *pkt,
 			void *userdata)
 {
+	UNUSED(stream);
+
 	struct vstrm_test_receiver *self = userdata;
 	int res;
 
@@ -145,6 +153,10 @@ static void codec_info_changed_cb(struct vstrm_receiver *stream,
 				  const struct vstrm_codec_info *info,
 				  void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(info);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -153,10 +165,13 @@ static void recv_frame_cb(struct vstrm_receiver *stream,
 			  struct vstrm_frame *frame,
 			  void *userdata)
 {
+	UNUSED(stream);
+
 	struct vstrm_test_receiver *self = userdata;
 	int res = 0;
 	uint8_t *data = NULL;
-	size_t size = 0, ret_size;
+	size_t size = 0;
+	size_t ret_size;
 
 	ULOGD("%s", __func__);
 
@@ -199,6 +214,10 @@ static void session_metadata_peer_changed_cb(struct vstrm_receiver *stream,
 					     const struct vmeta_session *meta,
 					     void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(meta);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -206,6 +225,10 @@ static void session_metadata_peer_changed_cb(struct vstrm_receiver *stream,
 static void
 goodbye_cb(struct vstrm_receiver *stream, const char *reason, void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(reason);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 

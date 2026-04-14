@@ -147,12 +147,16 @@ error:
 
 static void frame_dispose(struct vstrm_frame *frame)
 {
+	UNUSED(frame);
+
 	return;
 }
 
 
 static void socket_data_cb(int fd, uint32_t events, void *userdata)
 {
+	UNUSED(fd);
+
 	int res = 0;
 	struct vstrm_test_sender *self = userdata;
 	ssize_t readlen = 0;
@@ -180,6 +184,9 @@ static void socket_data_cb(int fd, uint32_t events, void *userdata)
 
 static void socket_ctrl_cb(int fd, uint32_t events, void *userdata)
 {
+	UNUSED(fd);
+	UNUSED(events);
+
 	int res;
 	struct vstrm_test_sender *self = userdata;
 	ssize_t readlen = 0;
@@ -229,6 +236,9 @@ static int send_data_cb(struct vstrm_sender *stream,
 			bool marker,
 			void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(marker);
+
 	struct vstrm_test_sender *self = userdata;
 	int res;
 
@@ -248,6 +258,8 @@ static int send_ctrl_cb(struct vstrm_sender *stream,
 			struct tpkt_packet *pkt,
 			void *userdata)
 {
+	UNUSED(stream);
+
 	struct vstrm_test_sender *self = userdata;
 	int res;
 
@@ -266,6 +278,8 @@ static int monitor_send_data_ready_cb(struct vstrm_sender *stream,
 				      int enable,
 				      void *userdata)
 {
+	UNUSED(stream);
+
 	struct vstrm_test_sender *self = userdata;
 	uint32_t events = POMP_FD_EVENT_IN | (enable ? POMP_FD_EVENT_OUT : 0);
 
@@ -285,6 +299,10 @@ static void session_metadata_peer_changed_cb(struct vstrm_sender *stream,
 					     const struct vmeta_session *meta,
 					     void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(meta);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -294,6 +312,11 @@ static void receiver_report_cb(struct vstrm_sender *stream,
 			       uint32_t rtd,
 			       void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(rr);
+	UNUSED(rtd);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -303,6 +326,11 @@ static void video_stats_cb(struct vstrm_sender *stream,
 			   const struct vstrm_video_stats_dyn *video_stats_dyn,
 			   void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(video_stats);
+	UNUSED(video_stats_dyn);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -310,6 +338,10 @@ static void video_stats_cb(struct vstrm_sender *stream,
 static void
 goodbye_cb(struct vstrm_sender *stream, const char *reason, void *userdata)
 {
+	UNUSED(stream);
+	UNUSED(reason);
+	UNUSED(userdata);
+
 	ULOGI("%s", __func__);
 }
 
@@ -333,6 +365,8 @@ static uint32_t get_socket_data_tx_size(uint32_t max_bitrate,
 
 static void au_end_cb(struct h264_ctx *ctx, void *userdata)
 {
+	UNUSED(ctx);
+
 	int res;
 	struct vstrm_test_sender *self = userdata;
 
@@ -359,6 +393,9 @@ static void nalu_end_cb(struct h264_ctx *ctx,
 			const struct h264_nalu_header *nh,
 			void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(nh);
+
 	int res;
 	struct vstrm_test_sender *self = userdata;
 	struct vstrm_frame_nalu nalu;
@@ -452,6 +489,8 @@ static int au_parse(struct vstrm_test_sender *self)
 
 static void au_parse_timer(struct pomp_timer *timer, void *userdata)
 {
+	UNUSED(timer);
+
 	struct vstrm_test_sender *self = userdata;
 	int res;
 

@@ -108,7 +108,7 @@ int vstrm_rtp_h264_rx_process_packet(struct vstrm_rtp_h264_rx *self,
 
 
 int vstrm_rtp_h264_rx_get_video_stats(
-	struct vstrm_rtp_h264_rx *self,
+	const struct vstrm_rtp_h264_rx *self,
 	const struct vstrm_video_stats **video_stats,
 	const struct vstrm_video_stats_dyn **video_stats_dyn);
 
@@ -118,7 +118,7 @@ int vstrm_rtp_h264_rx_set_video_stats(
 	const struct vstrm_video_stats *video_stats);
 
 
-int vstrm_rtp_h264_rx_get_codec_info(struct vstrm_rtp_h264_rx *self,
+int vstrm_rtp_h264_rx_get_codec_info(const struct vstrm_rtp_h264_rx *self,
 				     const struct vstrm_codec_info **info);
 
 
@@ -143,7 +143,7 @@ int vstrm_rtp_h264_tx_set_cfg_dyn(
 	const struct vstrm_rtp_h264_tx_cfg_dyn *cfg_dyn);
 
 
-int vstrm_rtp_h264_tx_get_stats(struct vstrm_rtp_h264_tx *self,
+int vstrm_rtp_h264_tx_get_stats(const struct vstrm_rtp_h264_tx *self,
 				struct vstrm_rtp_h264_tx_stats *stats);
 
 

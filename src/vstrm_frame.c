@@ -127,7 +127,9 @@ int vstrm_frame_add_nalu(struct vstrm_frame *self,
 }
 
 
-int vstrm_frame_get_size(struct vstrm_frame *self, size_t *size, uint32_t flags)
+int vstrm_frame_get_size(const struct vstrm_frame *self,
+			 size_t *size,
+			 uint32_t flags)
 {
 	const struct vstrm_frame_nalu *nalu = NULL;
 
@@ -154,7 +156,7 @@ int vstrm_frame_get_size(struct vstrm_frame *self, size_t *size, uint32_t flags)
 }
 
 
-int vstrm_frame_copy(struct vstrm_frame *self,
+int vstrm_frame_copy(const struct vstrm_frame *self,
 		     uint8_t *buf,
 		     size_t len,
 		     uint32_t flags)
@@ -230,4 +232,33 @@ const char *vstrm_frame_mb_status_str(enum vstrm_frame_mb_status val)
 	default:
 		return "UNKNOWN";
 	}
+}
+
+
+static inline bool vstrm_ps_cmp(const uint8_t *b1,
+				uint32_t len1,
+				const uint8_t *b2,
+				uint32_t len2,
+				size_t max_size)
+{
+	return ((len1 == len2) && (len1 <= max_size) &&
+		(memcmp(b1, b2, len1) == 0));
+}
+
+
+bool vstrm_codec_info_cmp(const struct vstrm_codec_info *i1,
+			  const struct vstrm_codec_info *i2)
+{
+	return (i1->codec == i2->codec) && (i1->h264.width == i2->h264.width) &&
+	       (i1->h264.height == i2->h264.height) &&
+	       vstrm_ps_cmp(i1->h264.sps,
+			    i1->h264.spslen,
+			    i2->h264.sps,
+			    i2->h264.spslen,
+			    sizeof(i1->h264.sps)) &&
+	       vstrm_ps_cmp(i1->h264.pps,
+			    i1->h264.ppslen,
+			    i2->h264.pps,
+			    i2->h264.ppslen,
+			    sizeof(i1->h264.pps));
 }

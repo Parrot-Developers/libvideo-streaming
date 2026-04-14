@@ -206,6 +206,8 @@ static void dot_clear(struct vstrm_rtp_h264_rx *self)
 	fprintf(self->dot_file, "}");
 	fclose(self->dot_file);
 	self->dot_file = NULL;
+#else
+	UNUSED(self);
 #endif
 }
 
@@ -226,6 +228,8 @@ static void dot_init(struct vstrm_rtp_h264_rx *self)
 	fprintf(self->dot_file, "digraph {\n");
 	fprintf(self->dot_file, "\tnode [style=filled]\n");
 	fprintf(self->dot_file, "\t\"UNDEF\" [fillcolor=firebrick1]\n");
+#else
+	UNUSED(self);
 #endif
 }
 
@@ -261,6 +265,9 @@ static void dot_add_frame(struct vstrm_rtp_h264_rx *self,
 			"\t\"#%u\" -> \"UNDEF\"\n",
 			frame->index);
 	}
+#else
+	UNUSED(self);
+	UNUSED(frame);
 #endif
 }
 
@@ -329,7 +336,7 @@ static void ref_short_inc_and_copy(struct vstrm_rtp_h264_rx *self,
 }
 
 
-static int ref_short_get_at_delta(struct vstrm_rtp_h264_rx *self,
+static int ref_short_get_at_delta(const struct vstrm_rtp_h264_rx *self,
 				  int delta,
 				  unsigned int *frame_index,
 				  const uint8_t **mb_status)
@@ -459,7 +466,7 @@ static void frame_set_mb_status(struct vstrm_rtp_h264_rx_frame *frame,
 }
 
 
-static void frame_dump_mb_status(struct vstrm_rtp_h264_rx_frame *frame)
+static void frame_dump_mb_status(const struct vstrm_rtp_h264_rx_frame *frame)
 {
 #ifdef DEBUG_MB_STATUS_DUMP
 	if (frame->base->info.mb_status == NULL)
@@ -500,6 +507,8 @@ static void frame_dump_mb_status(struct vstrm_rtp_h264_rx_frame *frame)
 		row[frame->base->info.mb_width] = '\0';
 		ULOGI("|%s|", row);
 	}
+#else
+	UNUSED(frame);
 #endif
 }
 
@@ -517,7 +526,7 @@ static void frame_dispose(struct vstrm_frame *base)
 }
 
 
-static int frame_new(struct vstrm_rtp_h264_rx *rx,
+static int frame_new(const struct vstrm_rtp_h264_rx *rx,
 		     unsigned int index,
 		     struct vstrm_rtp_h264_rx_frame **ret_obj)
 {
@@ -651,6 +660,12 @@ static void nalu_begin_cb(struct h264_ctx *ctx,
 			  const struct h264_nalu_header *nh,
 			  void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(type);
+	UNUSED(buf);
+	UNUSED(len);
+	UNUSED(nh);
+	UNUSED(userdata);
 }
 
 
@@ -660,6 +675,8 @@ static void slice_cb(struct h264_ctx *ctx,
 		     const struct h264_slice_header *sh,
 		     void *userdata)
 {
+	UNUSED(ctx);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	struct h264_nalu_header nh = {0};
 	int err;
@@ -883,6 +900,9 @@ static void slice_data_end_cb(struct h264_ctx *ctx,
 			      uint32_t mb_count,
 			      void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(sh);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	self->slice.mb_count = mb_count;
 }
@@ -894,6 +914,9 @@ static void slice_data_mb_cb(struct h264_ctx *ctx,
 			     enum h264_mb_type mb_type,
 			     void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(sh);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	enum vstrm_frame_mb_status status = VSTRM_FRAME_MB_STATUS_UNKNOWN;
 	if (self->update_mb_status) {
@@ -927,6 +950,8 @@ static void sps_cb(struct h264_ctx *ctx,
 		   const struct h264_sps *sps,
 		   void *userdata)
 {
+	UNUSED(ctx);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	void *newbuf = NULL;
 
@@ -956,6 +981,8 @@ static void pps_cb(struct h264_ctx *ctx,
 		   const struct h264_pps *pps,
 		   void *userdata)
 {
+	UNUSED(ctx);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	void *newbuf = NULL;
 
@@ -982,6 +1009,11 @@ static void sei_recovery_point_cb(struct h264_ctx *ctx,
 				  const struct h264_sei_recovery_point *sei,
 				  void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(buf);
+	UNUSED(len);
+	UNUSED(sei);
+
 	struct vstrm_rtp_h264_rx *self = userdata;
 	self->nalu.recovery_point = true;
 }
@@ -994,6 +1026,10 @@ sei_user_data_unregistered_cb(struct h264_ctx *ctx,
 			      const struct h264_sei_user_data_unregistered *sei,
 			      void *userdata)
 {
+	UNUSED(ctx);
+	UNUSED(buf);
+	UNUSED(len);
+
 	int res = 0;
 	struct vstrm_rtp_h264_rx *self = userdata;
 
@@ -1241,25 +1277,23 @@ static void update_err_sec_stats(struct vstrm_rtp_h264_rx *self,
 
 
 static void update_mb_status_stats(struct vstrm_rtp_h264_rx *self,
-				   struct vstrm_rtp_h264_rx_frame *frame)
+				   const struct vstrm_rtp_h264_rx_frame *frame)
 {
 	struct vstrm_video_stats_dyn *dyn = &self->video_stats_dyn;
 	for (uint32_t j = 0, k = 0; j < self->sps.mb_height; j++) {
 		for (uint32_t i = 0; i < self->sps.mb_width; i++, k++) {
 			uint32_t zone = j * dyn->mb_status_zone_count /
 					self->sps.mb_height;
-			uint8_t status =
-				(frame) ? frame->base->info.mb_status[k]
-					: VSTRM_FRAME_MB_STATUS_UNKNOWN;
+			uint8_t status = frame ? frame->base->info.mb_status[k]
+					       : VSTRM_FRAME_MB_STATUS_UNKNOWN;
 			vstrm_video_stats_dyn_inc_mb_status_count(
 				dyn, status, zone);
 			if (status != VSTRM_FRAME_MB_STATUS_VALID_ISLICE &&
 			    status != VSTRM_FRAME_MB_STATUS_VALID_PSLICE) {
 				update_err_sec_stats(
 					self,
-					(frame) ? frame->base->timestamps
-							  .ntp_raw
-						: self->last_timestamps.ntp_raw,
+					frame ? frame->base->timestamps.ntp_raw
+					      : self->last_timestamps.ntp_raw,
 					dyn,
 					zone);
 			}
@@ -1460,7 +1494,8 @@ static int generate_grey_i_frame(struct vstrm_rtp_h264_rx *self,
 				 struct vstrm_rtp_h264_rx_frame **frame)
 {
 	int res = 0;
-	struct pomp_buffer *buf = NULL, *slice_buf = NULL;
+	struct pomp_buffer *buf = NULL;
+	struct pomp_buffer *slice_buf = NULL;
 
 	ULOGI("generating grey IDR frame");
 
@@ -1588,7 +1623,7 @@ static int generate_skipped_p_frame(struct vstrm_rtp_h264_rx *self,
 out:
 	if (buf != NULL)
 		pomp_buffer_unref(buf);
-	if (res != 0 && *frame != NULL) {
+	if (res < 0 && *frame != NULL) {
 		vstrm_frame_unref((*frame)->base);
 		*frame = NULL;
 	}
@@ -2061,7 +2096,8 @@ static int handle_missing_eof(struct vstrm_rtp_h264_rx *self)
 
 static void sps_received(struct vstrm_rtp_h264_rx *self)
 {
-	uint32_t mb_width = 0, mb_height = 0;
+	uint32_t mb_width = 0;
+	uint32_t mb_height = 0;
 
 	/* Abort current frame if any */
 	if (self->current_frame != NULL) {
@@ -2125,7 +2161,7 @@ static void pps_received(struct vstrm_rtp_h264_rx *self)
 	memcpy(codec_info.h264.pps, self->pps.buf, self->pps.len);
 
 	/* Check if changed */
-	if (memcmp(&codec_info, &self->codec_info, sizeof(codec_info))) {
+	if (!vstrm_codec_info_cmp(&codec_info, &self->codec_info)) {
 		/* TODO: merge this with part of vstrm_rtp_h264_rx_clear? */
 		self->au.frame_num = 0;
 		self->au.prev_frame_num = 0;
@@ -2157,7 +2193,8 @@ static int nalu_complete(struct vstrm_rtp_h264_rx *self)
 	const void *cdata = NULL;
 	size_t len = 0;
 	struct h264_nalu_header nh;
-	int parse_nalu = 0, is_slice = 0;
+	int parse_nalu = 0;
+	int is_slice = 0;
 	memset(&nh, 0, sizeof(nh));
 	memset(&self->slice_copy, 0, sizeof(self->slice_copy));
 
@@ -2270,6 +2307,9 @@ static int process_aggregation(struct vstrm_rtp_h264_rx *self,
 			       const uint8_t *payloadbuf,
 			       size_t payloadlen)
 {
+	UNUSED(stap_ind);
+	UNUSED(don);
+
 	int res = 0;
 	uint16_t nalulen = 0;
 
@@ -2316,6 +2356,8 @@ static int process_fragment(struct vstrm_rtp_h264_rx *self,
 			    const uint8_t *payloadbuf,
 			    size_t payloadlen)
 {
+	UNUSED(don);
+
 	int res = 0;
 	int start = (fu_hdr & 0x80) != 0;
 	int end = (fu_hdr & 0x40) != 0;
@@ -2361,7 +2403,8 @@ out:
 }
 
 
-static inline int has_pack(struct vstrm_rtp_h264_rx *self, uint8_t pack_id)
+static inline int has_pack(const struct vstrm_rtp_h264_rx *self,
+			   uint8_t pack_id)
 {
 	/* Never process packs >= 128 */
 	if (pack_id < 64)
@@ -2385,7 +2428,7 @@ static inline void set_pack(struct vstrm_rtp_h264_rx *self, uint8_t pack_id)
 }
 
 
-static inline int has_all_packs(struct vstrm_rtp_h264_rx *self,
+static inline int has_all_packs(const struct vstrm_rtp_h264_rx *self,
 				uint8_t last_pack_id)
 {
 	/* We cannot have more than 128 packs */
@@ -2426,7 +2469,9 @@ static int process_extheader(struct vstrm_rtp_h264_rx *self,
 
 		uint16_t last_cur_pad;
 		memcpy(&last_cur_pad, &extheaderbuf[4], sizeof(last_cur_pad));
-		uint8_t last_pack, cur_pack, padding;
+		uint8_t last_pack;
+		uint8_t cur_pack;
+		uint8_t padding;
 		vstrm_rtp_h264_meta_header_unpack(
 			last_cur_pad, &last_pack, &cur_pack, &padding);
 		uint16_t offset;
@@ -2795,7 +2840,7 @@ out:
 
 
 int vstrm_rtp_h264_rx_get_video_stats(
-	struct vstrm_rtp_h264_rx *self,
+	const struct vstrm_rtp_h264_rx *self,
 	const struct vstrm_video_stats **video_stats,
 	const struct vstrm_video_stats_dyn **video_stats_dyn)
 {
@@ -2849,7 +2894,7 @@ int vstrm_rtp_h264_rx_set_video_stats(
 }
 
 
-int vstrm_rtp_h264_rx_get_codec_info(struct vstrm_rtp_h264_rx *self,
+int vstrm_rtp_h264_rx_get_codec_info(const struct vstrm_rtp_h264_rx *self,
 				     const struct vstrm_codec_info **info)
 {
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);

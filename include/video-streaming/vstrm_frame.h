@@ -333,7 +333,7 @@ int vstrm_frame_add_nalu(struct vstrm_frame *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_frame_get_size(struct vstrm_frame *self,
+int vstrm_frame_get_size(const struct vstrm_frame *self,
 			 size_t *size,
 			 uint32_t flags);
 
@@ -348,7 +348,7 @@ int vstrm_frame_get_size(struct vstrm_frame *self,
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
-int vstrm_frame_copy(struct vstrm_frame *self,
+int vstrm_frame_copy(const struct vstrm_frame *self,
 		     uint8_t *buf,
 		     size_t len,
 		     uint32_t flags);
@@ -370,6 +370,16 @@ const char *vstrm_codec_str(enum vstrm_codec val);
  */
 VSTRM_API
 const char *vstrm_frame_mb_status_str(enum vstrm_frame_mb_status val);
+
+
+/**
+ * Compare two vstrm_codec_info structures.
+ * @param i1: pointer to the 1st vstrm_codec_info to compare.
+ * @param i2: pointer to the 2nd vstrm_codec_info to compare.
+ * @return true if the two structures are identical.
+ */
+VSTRM_API bool vstrm_codec_info_cmp(const struct vstrm_codec_info *i1,
+				    const struct vstrm_codec_info *i2);
 
 
 #endif /* !_VSTRM_FRAME_H_ */
