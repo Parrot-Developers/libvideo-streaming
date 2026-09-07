@@ -258,7 +258,7 @@ int vstrm_receiver_set_codec_info(struct vstrm_receiver *self,
  * @return the NTP timestamp on success, 0 in case of error
  */
 VSTRM_API
-uint64_t vstrm_receiver_get_ntp_from_rtp_ts(struct vstrm_receiver *self,
+uint64_t vstrm_receiver_get_ntp_from_rtp_ts(const struct vstrm_receiver *self,
 					    uint32_t rtpts);
 
 

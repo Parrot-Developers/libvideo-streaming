@@ -45,11 +45,7 @@ struct vstrm_sender {
 	uint64_t rtcp_recv_ts;
 	uint64_t full_sdes_send_ts;
 	uint64_t clock_delta_send_ts;
-
-	struct list_node packets;
 	uint16_t next_seqnum;
-	int monitoring_send_data_ready;
-	int send_data_ready;
 
 	struct vstrm_sender_stats stats;
 
@@ -112,7 +108,7 @@ vstrm_sender_rtcp_receiver_report_cb(const struct rtcp_pkt_receiver_report *rr,
 			}
 			self->invalid_rtd_count++;
 		} else {
-			rtd_us = diff - dlsr;
+			rtd_us = (uint32_t)(diff - dlsr);
 			if (self->invalid_rtd) {
 				self->invalid_rtd = false;
 				ULOGE("RTD is now valid (%" PRIu64
@@ -278,13 +274,14 @@ vstrm_sender_write_rtcp_sender_report(const struct vstrm_sender *self,
 	ntp_timestamp64_from_us(&sr.ntp_timestamp, cur_timestamp);
 
 	/* Get the RTP timestamp corresponding to current NTP timestamp */
-	diff = cur_timestamp - self->last_ntp_timestamp;
+	diff = (int64_t)(cur_timestamp - self->last_ntp_timestamp);
 	if (diff > 0)
-		diff = rtp_timestamp_from_us(diff, VSTRM_RTP_H264_CLK_RATE);
+		diff = (int64_t)rtp_timestamp_from_us((uint64_t)diff,
+						      VSTRM_RTP_H264_CLK_RATE);
 	else
-		diff = -(int64_t)rtp_timestamp_from_us(-diff,
+		diff = -(int64_t)rtp_timestamp_from_us((uint64_t)-diff,
 						       VSTRM_RTP_H264_CLK_RATE);
-	sr.rtp_timestamp = self->last_rtp_timestamp + diff;
+	sr.rtp_timestamp = (uint32_t)((int64_t)self->last_rtp_timestamp + diff);
 
 	/* Count of packets/bytes sent */
 	sr.sender_packet_count = self->stats.total_packet_count;
@@ -335,7 +332,7 @@ static int vstrm_sender_write_rtcp_sdes(const struct vstrm_sender *self,
 		chunk.items = &item;
 		item.type = RTCP_PKT_SDES_TYPE_CNAME;
 		item.data = (const uint8_t *)serial;
-		item.data_len = strnlen(serial, max_len);
+		item.data_len = (uint8_t)strnlen(serial, max_len);
 		res = rtcp_pkt_write_sdes(buf, pos, &sdes);
 	}
 
@@ -381,7 +378,7 @@ static int vstrm_sender_write_rtcp_clock_delta(struct vstrm_sender *self,
 	app.name = VSTRM_RTCP_APP_PACKET_NAME;
 	app.subtype = VSTRM_RTCP_APP_PACKET_SUBTYPE_CLOCK_DELTA;
 	app.data = cdata;
-	app.data_len = len;
+	app.data_len = (uint32_t)len;
 
 	/* Write in packet */
 	res = rtcp_pkt_write_app(buf, pos, &app);
@@ -430,7 +427,7 @@ static int vstrm_sender_write_rtcp_event(const struct vstrm_sender *self,
 	app.name = VSTRM_RTCP_APP_PACKET_NAME;
 	app.subtype = VSTRM_RTCP_APP_PACKET_SUBTYPE_EVENT;
 	app.data = cdata;
-	app.data_len = len;
+	app.data_len = (uint32_t)len;
 
 	/* Write in packet */
 	res = rtcp_pkt_write_app(buf, pos, &app);
@@ -590,213 +587,12 @@ static void vstrm_sender_rtcp_timer_cb(struct pomp_timer *timer, void *userdata)
 }
 
 
-static void vstrm_sender_monitor_send_data_ready(struct vstrm_sender *self,
-						 int enable)
-{
-	int res = 0;
-	res = (*self->cbs.monitor_send_data_ready)(
-		self, enable, self->cbs_userdata);
-	if (res < 0) {
-		ULOG_ERRNO("cbs.monitor_send_data_ready", -res);
-	} else {
-		self->send_data_ready = !enable;
-		self->monitoring_send_data_ready = enable;
-	}
-}
-
-
 static void tpkt_user_data_release_cb(struct tpkt_packet *tpkt, void *user_data)
 {
 	ULOG_ERRNO_RETURN_IF(tpkt == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_IF(user_data == NULL, EINVAL);
 
 	free(user_data);
-}
-
-
-static void vstrm_sender_process_queue(struct vstrm_sender *self)
-{
-	int res = 0;
-	struct rtp_pkt *rtp_pkt = NULL;
-	struct rtp_pkt *tmp_pkt = NULL;
-	struct tpkt_packet *pkt = NULL;
-	struct timespec ts = {0, 0};
-	uint64_t cur_timestamp = 0;
-	uint64_t delta = 0;
-	bool marker = false;
-
-	while (!list_is_empty(&self->packets)) {
-		/* Get next packet */
-		rtp_pkt = list_entry(
-			list_first(&self->packets), struct rtp_pkt, node);
-		if (rtp_pkt == NULL)
-			break;
-		res = tpkt_new_from_buffer(rtp_pkt->raw.buf, &pkt);
-		if (res < 0) {
-			ULOG_ERRNO("tpkt_new_from_buffer", -res);
-			goto error_next;
-		}
-		res = tpkt_set_importance(pkt, rtp_pkt->importance);
-		if (res < 0) {
-			ULOG_ERRNO("tpkt_set_importance", -res);
-			goto error_next;
-		}
-		if (rtp_pkt->userdata != NULL) {
-			res = tpkt_set_user_data(pkt,
-						 tpkt_user_data_release_cb,
-						 rtp_pkt->userdata);
-			if (res < 0) {
-				ULOG_ERRNO("tpkt_set_user_data", -res);
-				goto error_next;
-			}
-		}
-		marker =
-			RTP_PKT_HEADER_FLAGS_GET(rtp_pkt->header.flags, MARKER);
-
-		/* Send packet, consider it handled if success or error
-		 * that is not try again later (lower queue full) */
-		res = (*self->cbs.send_data)(
-			self, pkt, marker, self->cbs_userdata);
-		if (res == 0 || res != -EAGAIN) {
-			tpkt_unref(pkt);
-			pkt = NULL;
-			if (res != 0) {
-				if (res == -ENETUNREACH || res == -ENETDOWN) {
-					if (!self->data_netdown_logged) {
-						ULOG_ERRNO(
-							"cbs.send_data "
-							"(logged only once)",
-							-res);
-						self->data_netdown_logged =
-							true;
-					}
-				} else {
-					ULOG_ERRNO("cbs.send_data", -res);
-					self->data_netdown_logged = false;
-				}
-			} else {
-				self->data_netdown_logged = false;
-				if (self->dbg.rtp_out != NULL) {
-					vstrm_dbg_write_pomp_buf(
-						self->dbg.rtp_out,
-						rtp_pkt->raw.buf);
-				}
-			}
-			self->stats.total_packet_count++;
-			self->stats.total_byte_count +=
-				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
-				rtp_pkt->payload.len + rtp_pkt->padding.len;
-			self->stats.total_header_byte_count +=
-				RTP_PKT_HEADER_SIZE;
-			self->stats.total_headerext_byte_count +=
-				rtp_pkt->extheader.len;
-			self->stats.total_payload_byte_count +=
-				rtp_pkt->payload.len;
-			self->stats.total_padding_byte_count +=
-				rtp_pkt->padding.len;
-			if (rtp_pkt->importance <
-			    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
-				self->stats.total_packet_count_per_importance
-					[rtp_pkt->importance]++;
-				self->stats.total_byte_count_per_importance
-					[rtp_pkt->importance] +=
-					RTP_PKT_HEADER_SIZE +
-					rtp_pkt->extheader.len +
-					rtp_pkt->payload.len +
-					rtp_pkt->padding.len;
-			}
-			list_del(&rtp_pkt->node);
-			rtp_pkt_destroy(rtp_pkt);
-		} else {
-			/* res == -EAGAIN */
-			/* The rtp_pkt is not destroyed, the userdata must
-			 * not be freed by the tpkt.
-			 * The ownership is given back to the rtp_pkt. */
-			res = tpkt_set_user_data(pkt, NULL, NULL);
-			if (res < 0)
-				ULOG_ERRNO("tpkt_set_user_data", -res);
-			tpkt_unref(pkt);
-			pkt = NULL;
-			self->data_netdown_logged = false;
-			/* Queue full */
-			break;
-		}
-		continue;
-
-		/* clang-format off */
-error_next:
-		/* clang-format on */
-		if (pkt) {
-			tpkt_unref(pkt);
-			pkt = NULL;
-		}
-	}
-
-	time_get_monotonic(&ts);
-	time_timespec_to_us(&ts, &cur_timestamp);
-
-	/* Remove packets on timeout, but still account for them
-	 * in sender reports */
-	list_walk_entry_forward_safe(&self->packets, rtp_pkt, tmp_pkt, node)
-	{
-		if (cur_timestamp > rtp_pkt->out_timestamp &&
-		    rtp_pkt->out_timestamp != 0) {
-			delta = cur_timestamp - rtp_pkt->out_timestamp;
-			ULOGD("drop packet: seqnum=%u size=%zu "
-			      "importance=%" PRIu32 " (%ums late)",
-			      rtp_pkt->header.seqnum,
-			      rtp_pkt->raw.len,
-			      rtp_pkt->importance,
-			      (unsigned int)(delta / 1000));
-			self->stats.total_packet_count++;
-			self->stats.total_byte_count +=
-				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
-				rtp_pkt->payload.len + rtp_pkt->padding.len;
-			self->stats.total_header_byte_count +=
-				RTP_PKT_HEADER_SIZE;
-			self->stats.total_headerext_byte_count +=
-				rtp_pkt->extheader.len;
-			self->stats.total_payload_byte_count +=
-				rtp_pkt->payload.len;
-			self->stats.total_padding_byte_count +=
-				rtp_pkt->padding.len;
-			self->stats.dropped_packet_count++;
-			self->stats.dropped_byte_count +=
-				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
-				rtp_pkt->payload.len + rtp_pkt->padding.len;
-			if (rtp_pkt->importance <
-			    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
-				self->stats.total_packet_count_per_importance
-					[rtp_pkt->importance]++;
-				self->stats.total_byte_count_per_importance
-					[rtp_pkt->importance] +=
-					RTP_PKT_HEADER_SIZE +
-					rtp_pkt->extheader.len +
-					rtp_pkt->payload.len +
-					rtp_pkt->padding.len;
-				self->stats.dropped_packet_count_per_importance
-					[rtp_pkt->importance]++;
-				self->stats.dropped_byte_count_per_importance
-					[rtp_pkt->importance] +=
-					RTP_PKT_HEADER_SIZE +
-					rtp_pkt->extheader.len +
-					rtp_pkt->payload.len +
-					rtp_pkt->padding.len;
-			}
-			list_del(&rtp_pkt->node);
-			free(rtp_pkt->userdata);
-			rtp_pkt_destroy(rtp_pkt);
-		}
-	}
-
-	/* Update monitoring */
-	if (list_is_empty(&self->packets)) {
-		if (self->monitoring_send_data_ready)
-			vstrm_sender_monitor_send_data_ready(self, 0);
-	} else {
-		if (!self->monitoring_send_data_ready)
-			vstrm_sender_monitor_send_data_ready(self, 1);
-	}
 }
 
 
@@ -872,9 +668,7 @@ int vstrm_sender_new(const struct vstrm_sender_cfg *cfg,
 	ULOG_ERRNO_RETURN_ERR_IF(ret_obj == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(cfg == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(cbs == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(cbs->send_data == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(cbs->send_ctrl == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(cbs->monitor_send_data_ready == NULL, EINVAL);
 
 	*ret_obj = NULL;
 
@@ -890,14 +684,12 @@ int vstrm_sender_new(const struct vstrm_sender_cfg *cfg,
 		ULOG_ERRNO("futils_random32", -res);
 		goto error;
 	}
-	list_init(&self->packets);
-	self->send_data_ready = 1;
 
 	/* Override debug config with environment if any */
 	if (env_dbg_dir != NULL)
 		self->cfg.dbg_dir = env_dbg_dir;
 	if (env_dbg_flags != NULL)
-		self->cfg.dbg_flags = strtol(env_dbg_flags, NULL, 0);
+		self->cfg.dbg_flags = (uint32_t)strtol(env_dbg_flags, NULL, 0);
 
 	/* Copy debug directory string and update config pointer */
 	if (self->cfg.dbg_dir != NULL) {
@@ -909,16 +701,13 @@ int vstrm_sender_new(const struct vstrm_sender_cfg *cfg,
 	/* Session metadata */
 	self->session_metadata_self = &self->cfg.self_meta;
 
-	/* Create H.264 payloader (unless it is a raw sender) */
-	if ((self->cfg.flags & VSTRM_SENDER_FLAGS_RAW) == 0) {
-		memset(&rtp_h264_cfg, 0, sizeof(rtp_h264_cfg));
-		rtp_h264_cfg.flags = cfg->flags;
-		rtp_h264_cfg.dyn.target_packet_size =
-			cfg->dyn.target_packet_size;
-		res = vstrm_rtp_h264_tx_new(&rtp_h264_cfg, &self->rtp_h264);
-		if (res < 0)
-			goto error;
-	}
+	/* Create H.264 payloader */
+	memset(&rtp_h264_cfg, 0, sizeof(rtp_h264_cfg));
+	rtp_h264_cfg.flags = cfg->flags;
+	rtp_h264_cfg.dyn.target_packet_size = cfg->dyn.target_packet_size;
+	res = vstrm_rtp_h264_tx_new(&rtp_h264_cfg, &self->rtp_h264);
+	if (res < 0)
+		goto error;
 
 	/* Create RTCP timer */
 	if ((self->cfg.flags & VSTRM_SENDER_FLAGS_ENABLE_RTCP) != 0) {
@@ -944,17 +733,7 @@ error:
 
 int vstrm_sender_destroy(struct vstrm_sender *self)
 {
-	struct rtp_pkt *pkt = NULL;
-
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-
-	while (!list_is_empty(&self->packets)) {
-		pkt = list_entry(
-			list_first(&self->packets), struct rtp_pkt, node);
-		list_del(&pkt->node);
-		free(pkt->userdata);
-		rtp_pkt_destroy(pkt);
-	}
 
 	if (self->rtp_h264 != NULL)
 		vstrm_rtp_h264_tx_destroy(self->rtp_h264);
@@ -970,11 +749,18 @@ int vstrm_sender_destroy(struct vstrm_sender *self)
 
 
 int vstrm_sender_send_frame(struct vstrm_sender *self,
-			    struct vstrm_frame *frame)
+			    struct mbuf_coded_video_frame *frame,
+			    struct vmeta_frame *metadata,
+			    const void *ancillary_data,
+			    size_t ancillary_data_len,
+			    struct tpkt_list **list)
 {
 	int res = 0;
+	struct vstrm_frame *vframe = NULL;
 	struct list_node packets;
-	struct rtp_pkt *pkt = NULL;
+	struct rtp_pkt *rtp_pkt = NULL;
+	struct tpkt_packet *tpkt = NULL;
+	struct tpkt_list *pkt_list = NULL;
 	struct timespec ts = {0, 0};
 	uint64_t cur_timestamp = 0;
 	uint32_t rtp_timestamp = 0;
@@ -985,52 +771,60 @@ int vstrm_sender_send_frame(struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(frame == NULL, EINVAL);
 
-	/* Must not be a raw sender */
-	ULOG_ERRNO_RETURN_ERR_IF(
-		(self->cfg.flags & VSTRM_SENDER_FLAGS_RAW) != 0, EPERM);
+	res = vstrm_frame_new_from_mbuf_coded_video_frame(
+		frame, metadata, &vframe);
+	if (res < 0) {
+		ULOG_ERRNO("vstrm_frame_new_from_mbuf_coded_video_frame", -res);
+		return res;
+	}
 
 	time_get_monotonic(&ts);
 	time_timespec_to_us(&ts, &cur_timestamp);
-	rtp_timestamp = rtp_timestamp_from_us(frame->timestamps.ntp,
-					      VSTRM_RTP_H264_CLK_RATE);
-	ntp_timestamp = frame->timestamps.ntp;
+	rtp_timestamp = (uint32_t)rtp_timestamp_from_us(
+		vframe->timestamps.ntp, VSTRM_RTP_H264_CLK_RATE);
+	ntp_timestamp = vframe->timestamps.ntp;
 	self->last_rtp_timestamp = rtp_timestamp;
 	self->last_ntp_timestamp = ntp_timestamp;
 
 	/* TODO: give a real codec info */
 	if (self->dbg.stream != NULL)
-		vstrm_dbg_write_frame(self->dbg.stream, NULL, frame);
+		vstrm_dbg_write_frame(self->dbg.stream, NULL, vframe);
 
-	/* Create packets */
+	/* Create the frame packets */
 	list_init(&packets);
-	res = vstrm_rtp_h264_tx_process_frame(self->rtp_h264, frame, &packets);
+	res = vstrm_rtp_h264_tx_process_frame(self->rtp_h264, vframe, &packets);
 	if (res < 0)
 		goto out;
 
-	/* Queue packets */
+	res = tpkt_list_new(&pkt_list);
+	if (res < 0) {
+		ULOG_ERRNO("tpkt_list_new", -res);
+		goto out;
+	}
+
+	/* Process the frame packets */
 	while (!list_is_empty(&packets)) {
-		pkt = list_entry(list_first(&packets), struct rtp_pkt, node);
-		list_del(&pkt->node);
+		bool free_userdata = true;
+		rtp_pkt =
+			list_entry(list_first(&packets), struct rtp_pkt, node);
 
-		pkt->header.seqnum = self->next_seqnum;
-		pkt->header.ssrc = self->ssrc;
-		pkt->header.timestamp = rtp_timestamp;
+		rtp_pkt->header.seqnum = self->next_seqnum;
+		rtp_pkt->header.ssrc = self->ssrc;
+		rtp_pkt->header.timestamp = rtp_timestamp;
 		/* TODO: handle wrap */
-		pkt->rtp_timestamp = rtp_timestamp;
-		pkt->in_timestamp = cur_timestamp;
+		rtp_pkt->rtp_timestamp = rtp_timestamp;
+		rtp_pkt->in_timestamp = cur_timestamp;
 
-		if (frame->ancillary_data.data != NULL &&
-		    frame->ancillary_data.size > 0) {
-			/* Copy frame ancillary data in the rtp_pkt userdata */
-			void *rtp_pkt_userdata =
-				calloc(1, frame->ancillary_data.size);
+		if (ancillary_data != NULL && ancillary_data_len > 0) {
+			/* Copy the ancillary data in the rtp_pkt userdata */
+			void *rtp_pkt_userdata = calloc(1, ancillary_data_len);
 			if (rtp_pkt_userdata == NULL) {
-				ULOG_ERRNO("calloc", -res);
+				ULOG_ERRNO("calloc", ENOMEM);
 			} else {
 				memcpy(rtp_pkt_userdata,
-				       frame->ancillary_data.data,
-				       frame->ancillary_data.size);
-				pkt->userdata = rtp_pkt_userdata;
+				       ancillary_data,
+				       ancillary_data_len);
+				rtp_pkt->userdata = rtp_pkt_userdata;
 			}
 		}
 
@@ -1039,67 +833,115 @@ int vstrm_sender_send_frame(struct vstrm_sender *self,
 		 * (if the max total latency is not null) and
 		 * the input TS + the max network latency
 		 * (if the max total latency is not null). */
-		if (pkt->importance < VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
-			if (self->cfg.dyn
-				    .max_total_latency_ms[pkt->importance] != 0)
+		if (rtp_pkt->importance <
+		    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
+			if (self->cfg.dyn.max_total_latency_ms
+				    [rtp_pkt->importance] != 0)
 				out_timestamp1 =
-					frame->timestamps.ntp +
+					vframe->timestamps.ntp +
 					self->cfg.dyn.max_total_latency_ms
-							[pkt->importance] *
+							[rtp_pkt->importance] *
 						1000;
-			if (self->cfg.dyn
-				    .max_network_latency_ms[pkt->importance] !=
-			    0)
+			if (self->cfg.dyn.max_network_latency_ms
+				    [rtp_pkt->importance] != 0)
 				out_timestamp2 =
-					pkt->in_timestamp +
+					rtp_pkt->in_timestamp +
 					self->cfg.dyn.max_network_latency_ms
-							[pkt->importance] *
+							[rtp_pkt->importance] *
 						1000;
 		}
-		pkt->out_timestamp = out_timestamp1;
+		rtp_pkt->out_timestamp = out_timestamp1;
 		if ((out_timestamp1 == 0) || (out_timestamp2 < out_timestamp1))
-			pkt->out_timestamp = out_timestamp2;
+			rtp_pkt->out_timestamp = out_timestamp2;
 
 		/* Finalize header (should not fail, buffer already contains
 		 * reserved room for it) */
-		res = rtp_pkt_finalize_header(pkt);
+		res = rtp_pkt_finalize_header(rtp_pkt);
 		if (res < 0)
 			ULOG_ERRNO("rtp_pkt_finalize_header", -res);
-		list_add_after(list_last(&self->packets), &pkt->node);
 		self->next_seqnum = (self->next_seqnum + 1) & 0xffff;
 
 		if (self->dbg.rtp_payload != NULL) {
 			vstrm_dbg_write_pomp_buf(self->dbg.rtp_payload,
-						 pkt->raw.buf);
+						 rtp_pkt->raw.buf);
 		}
+
+		/* Convert to a transport-packet */
+		res = tpkt_new_from_buffer(rtp_pkt->raw.buf, &tpkt);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_new_from_buffer", -res);
+			goto next;
+		}
+		res = tpkt_set_expiration_timestamp(tpkt,
+						    rtp_pkt->out_timestamp);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_set_expiration_timestamp", -res);
+			goto next;
+		}
+		res = tpkt_set_importance(tpkt, rtp_pkt->importance);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_set_importance", -res);
+			goto next;
+		}
+		if (rtp_pkt->userdata != NULL) {
+			res = tpkt_set_user_data(tpkt,
+						 tpkt_user_data_release_cb,
+						 rtp_pkt->userdata);
+			if (res < 0) {
+				ULOG_ERRNO("tpkt_set_user_data", -res);
+				goto next;
+			}
+			free_userdata = false;
+		}
+
+		res = tpkt_list_add_last(pkt_list, tpkt);
+		if (res < 0) {
+			ULOG_ERRNO("tpkt_list_add_last", -res);
+			goto next;
+		}
+
+		/* Update the sender stats */
+		self->stats.total_packet_count++;
+		self->stats.total_byte_count +=
+			RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
+			rtp_pkt->payload.len + rtp_pkt->padding.len;
+		self->stats.total_header_byte_count += RTP_PKT_HEADER_SIZE;
+		self->stats.total_headerext_byte_count +=
+			rtp_pkt->extheader.len;
+		self->stats.total_payload_byte_count += rtp_pkt->payload.len;
+		self->stats.total_padding_byte_count += rtp_pkt->padding.len;
+		if (rtp_pkt->importance <
+		    VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS) {
+			self->stats.total_packet_count_per_importance
+				[rtp_pkt->importance]++;
+			self->stats.total_byte_count_per_importance
+				[rtp_pkt->importance] +=
+				RTP_PKT_HEADER_SIZE + rtp_pkt->extheader.len +
+				rtp_pkt->payload.len + rtp_pkt->padding.len;
+		}
+
+		/* clang-format off */
+next:
+		/* clang-format on */
+		if (tpkt) {
+			tpkt_unref(tpkt);
+			tpkt = NULL;
+		}
+		list_del(&rtp_pkt->node);
+		if (free_userdata)
+			free(rtp_pkt->userdata);
+		rtp_pkt_destroy(rtp_pkt);
 	}
 
-	/* Process now if possible */
-	if (self->send_data_ready)
-		vstrm_sender_process_queue(self);
-
 out:
+	if (res != 0)
+		(void)tpkt_list_destroy(pkt_list);
+	else if (list != NULL)
+		*list = pkt_list;
+
+	vstrm_frame_unref(vframe);
+
 	return res;
-}
-
-
-int vstrm_sender_send_rtp_pkt(struct vstrm_sender *self, struct rtp_pkt *pkt)
-{
-	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(pkt == NULL, EINVAL);
-	ULOG_ERRNO_RETURN_ERR_IF(!list_node_is_unref(&pkt->node), EINVAL);
-
-	/* Must be a raw sender */
-	ULOG_ERRNO_RETURN_ERR_IF(
-		(self->cfg.flags & VSTRM_SENDER_FLAGS_RAW) == 0, EPERM);
-
-	/* Add in list, process now if possible */
-	/* TODO: update timeout */
-	list_add_after(list_last(&self->packets), &pkt->node);
-	if (self->send_data_ready)
-		vstrm_sender_process_queue(self);
-
-	return 0;
 }
 
 
@@ -1178,16 +1020,6 @@ out:
 }
 
 
-int vstrm_sender_notify_send_data_ready(struct vstrm_sender *self)
-{
-	ULOG_ERRNO_RETURN_ERR_IF(self == NULL, EINVAL);
-
-	self->send_data_ready = 1;
-	vstrm_sender_process_queue(self);
-	return 0;
-}
-
-
 int vstrm_sender_get_cfg_dyn(const struct vstrm_sender *self,
 			     struct vstrm_sender_cfg_dyn *cfg_dyn)
 {
@@ -1231,15 +1063,11 @@ int vstrm_sender_get_next_frame_params(const struct vstrm_sender *self,
 	ULOG_ERRNO_RETURN_ERR_IF(seq == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(rtpts == NULL, EINVAL);
 
-	/* Must not be a raw sender */
-	ULOG_ERRNO_RETURN_ERR_IF(
-		(self->cfg.flags & VSTRM_SENDER_FLAGS_RAW) != 0, EPERM);
-
 	rtp_timestamp =
 		rtp_timestamp_from_us(timestamp, VSTRM_RTP_H264_CLK_RATE);
 
 	*seq = self->next_seqnum;
-	*rtpts = rtp_timestamp;
+	*rtpts = (uint32_t)rtp_timestamp;
 
 	return 0;
 }

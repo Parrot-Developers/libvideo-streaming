@@ -45,9 +45,6 @@ struct vstrm_sender;
 /* Enable RTCP extensions (Parrot clock delta algorithm) */
 #define VSTRM_SENDER_FLAGS_ENABLE_RTCP_EXT (1 << 2)
 
-/* Enable raw sender */
-#define VSTRM_SENDER_FLAGS_RAW (1 << 3)
-
 
 /* Sender dynamic configuration */
 struct vstrm_sender_cfg_dyn {
@@ -59,12 +56,12 @@ struct vstrm_sender_cfg_dyn {
 	uint32_t packet_size_align;
 
 	/* Maximum acceptable total latency in ms for each importance level
-	 * (no drop if 0); the total latency is the difference between the
+	 * (ignored if 0); the total latency is the difference between the
 	 * frame capture TS and the output time on the network */
 	uint32_t max_total_latency_ms[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
 
 	/* Maximum acceptable network latency in ms for each importance level
-	 * (no drop if 0); the network latency is the difference between the
+	 * (ignored if 0); the network latency is the difference between the
 	 * frame input TS in the sender and the output time on the network */
 	uint32_t max_network_latency_ms[VSTRM_FRAME_MAX_NALU_IMPORTANCE_LEVELS];
 };
@@ -95,19 +92,6 @@ struct vstrm_sender_cfg {
 
 /* Sender callback functions */
 struct vstrm_sender_cbs {
-	/* Called when a data (RTP) packet needs to be sent.
-	 * The sender has a reference on the packet and it must not be
-	 * unreferenced by the callback function.
-	 * @param stream: sender instance pointer
-	 * @param pkt: pointer to the packet to send
-	 * @param marker: RTP header marker bit
-	 * @param userdata: user data pointer
-	 * @return 0 on success, negative errno value in case of error */
-	int (*send_data)(struct vstrm_sender *stream,
-			 struct tpkt_packet *pkt,
-			 bool marker,
-			 void *userdata);
-
 	/* Called when a control (RTCP) packet needs to be sent.
 	 * The sender has a reference on the packet and it does not need to be
 	 * unreferenced by the callback function.
@@ -118,16 +102,6 @@ struct vstrm_sender_cbs {
 	int (*send_ctrl)(struct vstrm_sender *stream,
 			 struct tpkt_packet *pkt,
 			 void *userdata);
-
-	/* Called to enable/disable the output availability monitoring (ready
-	 * to send) on the data (RTP) channel.
-	 * @param stream: sender instance pointer
-	 * @param enable: 1: enable output availability monitoring, 0: disable
-	 * @param userdata: user data pointer
-	 * @return 0 on success, negative errno value in case of error */
-	int (*monitor_send_data_ready)(struct vstrm_sender *stream,
-				       int enable,
-				       void *userdata);
 
 	/* Called when the peer session metadata has changed.
 	 * @param stream: sender instance pointer
@@ -276,28 +250,29 @@ int vstrm_sender_destroy(struct vstrm_sender *self);
  * previously allocated using the vstrm_frame_new() function. It is the
  * caller's responsibility to unreference the frame after returning from
  * this function once it is no longer needed.
+ * Metadata can be passed alongside the frame without modifying the frame
+ * object itself, allowing the same frame to be reused across senders.
  * When in raw sender mode, this function returns a -EPERM error.
  * @param self: sender instance handle
- * @param frame: pointer to the frame to send
+ * @param frame: pointer to the encoded frame to send
+ * @param metadata: optional frame metadata (can be NULL); read-only access,
+ *                  the caller retains ownership and the reference is
+ *                  untouched by this call
+ * @param ancillary_data: optional data copied into the user data of each
+ *                        resulting RTP/transport packet (can be NULL); the
+ *                        caller retains ownership and may free it as soon
+ *                        as this function returns
+ * @param ancillary_data_len: size in bytes of ancillary_data
+ * @param list: pointer to a list of packets for the frame (output)
  * @return 0 on success, negative errno value in case of error
  */
 VSTRM_API
 int vstrm_sender_send_frame(struct vstrm_sender *self,
-			    struct vstrm_frame *frame);
-
-
-/**
- * Send a data (RTP) packet.
- * The packet must have been previously allocated using the rtp_pkt_new()
- * function. The ownership of the buffer is transfered to the library and the
- * buffer must not be freed by the caller after returning from this function.
- * When not in raw sender mode, this function returns a -EPERM error.
- * @param self: sender instance handle
- * @param pkt: pointer to the packet to send
- * @return 0 on success, negative errno value in case of error
- */
-VSTRM_API
-int vstrm_sender_send_rtp_pkt(struct vstrm_sender *self, struct rtp_pkt *pkt);
+			    struct mbuf_coded_video_frame *frame,
+			    struct vmeta_frame *metadata,
+			    const void *ancillary_data,
+			    size_t ancillary_data_len,
+			    struct tpkt_list **list);
 
 
 /**
@@ -331,15 +306,6 @@ int vstrm_sender_send_goodbye(struct vstrm_sender *self, const char *reason);
  */
 VSTRM_API
 int vstrm_sender_recv_ctrl(struct vstrm_sender *self, struct tpkt_packet *pkt);
-
-
-/**
- * Notify that the data channel (RTP) is ready for sending.
- * @param self: sender instance handle
- * @return 0 on success, negative errno value in case of error
- */
-VSTRM_API
-int vstrm_sender_notify_send_data_ready(struct vstrm_sender *self);
 
 
 /**

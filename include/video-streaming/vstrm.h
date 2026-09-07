@@ -53,6 +53,7 @@ extern "C" {
 /* Forward declarations */
 struct rtp_pkt;
 struct rtcp_pkt_receiver_report;
+struct mbuf_coded_video_frame;
 
 
 #include "video-streaming/vstrm_events.h"

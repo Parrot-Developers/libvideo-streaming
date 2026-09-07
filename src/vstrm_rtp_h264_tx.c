@@ -121,13 +121,14 @@ static int vstrm_rtp_h264_tx_add_proto_metadata(struct vstrm_rtp_h264_tx *self)
 
 	if (list_is_empty(self->packets)) {
 		/* Split into VSTRM_METADATA_FRAGMENT_MAX_LEN byte packets */
-		self->metadata.nb_packs =
+		size_t nb_packs =
 			(meta_len + VSTRM_METADATA_FRAGMENT_MAX_LEN - 1) /
 			VSTRM_METADATA_FRAGMENT_MAX_LEN;
-		if (self->metadata.nb_packs > 128) {
+		if (nb_packs > 128) {
 			res = -ENOBUFS;
 			goto out;
 		}
+		self->metadata.nb_packs = (uint8_t)nb_packs;
 		self->metadata.current_pack = 0;
 	}
 
@@ -160,8 +161,8 @@ static int vstrm_rtp_h264_tx_add_proto_metadata(struct vstrm_rtp_h264_tx *self)
 	udata = data;
 	/* Compute id + size + padding size */
 	id = htons(VMETA_FRAME_PROTO_RTP_EXT_ID);
-	len = htons(((packlen + 3) / 4) + 1);
-	offset = htons(packoff);
+	len = htons((uint16_t)(((packlen + 3) / 4) + 1));
+	offset = htons((uint16_t)packoff);
 	padding = 4 - (packlen % 4);
 	if (padding == 4)
 		padding = 0;
@@ -261,8 +262,8 @@ static void vstrm_rtp_h264_tx_end_pkt(struct vstrm_rtp_h264_tx *self)
 	/* Add optional padding */
 	if ((self->cfg.dyn.packet_size_align) &&
 	    (self->pkt->payload.len % self->cfg.dyn.packet_size_align)) {
-		uint8_t pad_len = self->pkt->payload.len %
-				  self->cfg.dyn.packet_size_align;
+		uint8_t pad_len = (uint8_t)(self->pkt->payload.len %
+					    self->cfg.dyn.packet_size_align);
 		uint8_t zero = 0;
 
 		self->pkt->padding.off =
@@ -316,7 +317,7 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 
 	/* Can we put this nalu in current payload? */
 	if (self->pkt != NULL && self->pos + 2 + nalu->len < max_size) {
-		uint16_t len = htons(nalu->len);
+		uint16_t len = htons((uint16_t)nalu->len);
 		CHECK(pomp_buffer_write(
 			self->pkt->raw.buf, &self->pos, &len, sizeof(len)));
 		CHECK(pomp_buffer_write(self->pkt->raw.buf,
@@ -346,7 +347,7 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 	    self->pos + nalu->len + 3 < max_size &&
 	    is_nalu_aggregable(nalu_type)) {
 		/* Aggregation */
-		uint16_t len = htons(nalu->len);
+		uint16_t len = htons((uint16_t)nalu->len);
 		uint8_t stap_ind = VSTRM_RTP_H264_NALU_TYPE_STAP_A;
 		CHECK(pomp_buffer_write(self->pkt->raw.buf,
 					&self->pos,
@@ -381,8 +382,9 @@ static int vstrm_rtp_h264_tx_add_nalu(struct vstrm_rtp_h264_tx *self,
 					 VSTRM_RTP_H264_NALU_TYPE_FU_A;
 			start = (off == 1);
 			end = (off + len == nalu->len);
-			uint8_t fu_hdr = (start << 7) | (end << 6) |
-					 (nalu->cdata[0] & 0x1f);
+			uint8_t fu_hdr = (uint8_t)(
+				((uint32_t)start << 7) | ((uint32_t)end << 6) |
+				((uint32_t)nalu->cdata[0] & 0x1f));
 			CHECK(pomp_buffer_write(self->pkt->raw.buf,
 						&self->pos,
 						&fu_ind,

@@ -390,7 +390,7 @@ static void ref_long_set_and_copy(struct vstrm_rtp_h264_rx *self,
 }
 
 
-static int ref_long_get(struct vstrm_rtp_h264_rx *self,
+static int ref_long_get(const struct vstrm_rtp_h264_rx *self,
 			unsigned int ltr_pic_num,
 			unsigned int *frame_index,
 			const uint8_t **mb_status)
@@ -446,11 +446,11 @@ static void frame_set_mb_status(struct vstrm_rtp_h264_rx_frame *frame,
 				case VSTRM_FRAME_MB_STATUS_VALID_ISLICE:
 				case VSTRM_FRAME_MB_STATUS_VALID_PSLICE:
 					/* OK, we can set the status */
-					mb_status[i] = status;
+					mb_status[i] = (uint8_t)status;
 					break;
 				default:
 					/* Error propagation */
-					mb_status[i] = err_prop;
+					mb_status[i] = (uint8_t)err_prop;
 					frame->base->info.error = 1;
 					break;
 				}
@@ -567,7 +567,7 @@ static int frame_new(const struct vstrm_rtp_h264_rx *rx,
 }
 
 
-static void frame_update(struct vstrm_rtp_h264_rx *self,
+static void frame_update(const struct vstrm_rtp_h264_rx *self,
 			 struct vstrm_rtp_h264_rx_frame *frame,
 			 const struct vstrm_rtp_h264_rx_slice *cur_slice)
 {
@@ -1703,11 +1703,12 @@ static void check_missing_frames(struct vstrm_rtp_h264_rx *self)
 		frame_num = (self->au.prev_frame_num + (i + 1)) %
 			    self->max_frame_num;
 		if (conceal_poc) {
-			float closest =
-				((float)missing_poc / (float)missing) * (i + 1);
-			pic_order_cnt_lsb = (self->au.prev_pic_order_count_lsb +
-					     (uint32_t)closest) %
-					    self->max_pic_order_cnt_lsb;
+			uint32_t closest =
+				(missing_poc * (i + 1) + (missing / 2)) /
+				missing;
+			pic_order_cnt_lsb =
+				(self->au.prev_pic_order_count_lsb + closest) %
+				self->max_pic_order_cnt_lsb;
 		}
 		if (conceal) {
 			/* Generate NALU with skipped P slice */
@@ -2147,7 +2148,7 @@ static void pps_received(struct vstrm_rtp_h264_rx *self)
 		      sizeof(codec_info.h264.sps));
 		return;
 	}
-	codec_info.h264.spslen = self->sps.len;
+	codec_info.h264.spslen = (uint32_t)self->sps.len;
 	memcpy(codec_info.h264.sps, self->sps.buf, self->sps.len);
 
 	/* Copy PPS */
@@ -2157,7 +2158,7 @@ static void pps_received(struct vstrm_rtp_h264_rx *self)
 		      sizeof(codec_info.h264.pps));
 		return;
 	}
-	codec_info.h264.ppslen = self->pps.len;
+	codec_info.h264.ppslen = (uint32_t)self->pps.len;
 	memcpy(codec_info.h264.pps, self->pps.buf, self->pps.len);
 
 	/* Check if changed */
@@ -2314,7 +2315,8 @@ static int process_aggregation(struct vstrm_rtp_h264_rx *self,
 	uint16_t nalulen = 0;
 
 	while (payloadlen >= 2) {
-		nalulen = (payloadbuf[0] << 8) | payloadbuf[1];
+		nalulen = (uint16_t)(((uint32_t)payloadbuf[0] << 8) |
+				     (uint32_t)payloadbuf[1]);
 		payloadbuf += 2;
 		payloadlen -= 2;
 
@@ -2641,6 +2643,11 @@ int vstrm_rtp_h264_rx_clear(struct vstrm_rtp_h264_rx *self, bool keep_ps)
 	self->max_num_ref_logged = false;
 	self->max_num_rplm_logged = false;
 
+	if (self->current_frame != NULL) {
+		vstrm_frame_unref(self->current_frame->base);
+		self->current_frame = NULL;
+	}
+
 	if (!keep_ps) {
 		memset(&self->codec_info, 0, sizeof(self->codec_info));
 		self->codec_info.codec = VSTRM_CODEC_VIDEO_H264;
@@ -2780,11 +2787,13 @@ int vstrm_rtp_h264_rx_process_packet(struct vstrm_rtp_h264_rx *self,
 			      3);
 			goto out;
 		}
-		res = process_aggregation(self,
-					  payloadbuf[0],
-					  (payloadbuf[1] << 8) | payloadbuf[2],
-					  payloadbuf + 3,
-					  payloadlen - 3);
+		res = process_aggregation(
+			self,
+			payloadbuf[0],
+			(uint16_t)(((uint32_t)payloadbuf[1] << 8) |
+				   (uint32_t)payloadbuf[2]),
+			payloadbuf + 3,
+			payloadlen - 3);
 		break;
 
 	case VSTRM_RTP_H264_NALU_TYPE_MTAP16: /* NO BREAK */
@@ -2817,12 +2826,14 @@ int vstrm_rtp_h264_rx_process_packet(struct vstrm_rtp_h264_rx *self,
 			      4);
 			goto out;
 		}
-		res = process_fragment(self,
-				       payloadbuf[0],
-				       payloadbuf[1],
-				       (payloadbuf[2] << 8) | payloadbuf[3],
-				       payloadbuf + 4,
-				       payloadlen - 4);
+		res = process_fragment(
+			self,
+			payloadbuf[0],
+			payloadbuf[1],
+			(uint16_t)(((uint32_t)payloadbuf[2] << 8) |
+				   (uint32_t)payloadbuf[3]),
+			payloadbuf + 4,
+			payloadlen - 4);
 		break;
 
 	default:

@@ -150,6 +150,26 @@ void vstrm_dbg_write_frame(FILE *file,
 			   const struct vstrm_frame *frame);
 
 
+/**
+ * Build a vstrm_frame wrapping a mbuf_coded_video_frame.
+ *
+ * NAL units are referenced (not copied) from the mbuf frame's storage. An extra
+ * reference on frame is taken and released when the returned vstrm_frame is
+ * disposed. If metadata is not NULL, an extra reference on metadata is also
+ * taken and held for the lifetime of the returned vstrm_frame. The frame must
+ * already be finalized.
+ *
+ * @param frame: pointer to the finalized mbuf coded video frame
+ * @param metadata: optional frame metadata to attach (can be NULL)
+ * @param ret_obj: pointer to the created vstrm_frame (output)
+ * @return 0 on success, negative errno value in case of error
+ */
+int vstrm_frame_new_from_mbuf_coded_video_frame(
+	struct mbuf_coded_video_frame *frame,
+	struct vmeta_frame *metadata,
+	struct vstrm_frame **ret_obj);
+
+
 static inline int
 vstrm_write_u8(struct pomp_buffer *buf, size_t *pos, uint8_t v)
 {

@@ -161,8 +161,9 @@ static inline uint16_t vstrm_rtp_h264_meta_header_pack(uint8_t last_pack,
 						       uint8_t current_pack,
 						       uint8_t padding)
 {
-	uint16_t packed = ((last_pack & 0x3f) << 9) |
-			  ((current_pack & 0x3f) << 2) | (padding & 0x3);
+	uint16_t packed = (uint16_t)((((uint32_t)last_pack & 0x3f) << 9) |
+				     (((uint32_t)current_pack & 0x3f) << 2) |
+				     ((uint32_t)padding & 0x3));
 	return htons(packed);
 }
 

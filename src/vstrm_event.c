@@ -42,10 +42,11 @@ int vstrm_event_write(struct pomp_buffer *buf,
 
 	ULOG_ERRNO_RETURN_ERR_IF(buf == NULL, EINVAL);
 	ULOG_ERRNO_RETURN_ERR_IF(pos == NULL, EINVAL);
+	ULOG_ERRNO_RETURN_ERR_IF(event < 0 || event > UINT8_MAX, EINVAL);
 
 	struct vstrm_event_msg msg = {
 		.version = VSTRM_EVENT_MSG_VERSION,
-		.event = event,
+		.event = (uint8_t)event,
 	};
 
 	CHECK(vstrm_write_u8(buf, pos, msg.version));

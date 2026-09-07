@@ -108,7 +108,7 @@ int vstrm_h264_sei_streaming_v1_write(
 	ssize_t res = vstrm_h264_sei_streaming_v1_get_size(sei);
 	if (res < 0) {
 		ULOG_ERRNO("vstrm_h264_sei_streaming_v1_get_size", (int)-res);
-		return res;
+		return (int)res;
 	}
 	size_t sz = res;
 
@@ -153,14 +153,17 @@ int vstrm_h264_sei_streaming_v1_read(struct vstrm_h264_sei_streaming_v1 *sei,
 	ssize_t res = vstrm_h264_sei_streaming_v1_get_size(sei);
 	if (res < 0) {
 		ULOG_ERRNO("vstrm_h264_sei_streaming_v1_get_size", (int)-res);
-		return res;
+		return (int)res;
 	}
 	size_t sz = res;
 
 	if (len < sz)
 		return -EIO;
-	for (uint32_t i = 0; i < sei->slice_count; i++)
-		sei->slice_mb_count[i] = (buf[2 * i + 2] << 8) | buf[2 * i + 3];
+	for (uint32_t i = 0; i < sei->slice_count; i++) {
+		sei->slice_mb_count[i] =
+			(uint16_t)(((uint32_t)buf[2 * i + 2] << 8) |
+				   (uint32_t)buf[2 * i + 3]);
+	}
 
 	return 0;
 }
@@ -200,7 +203,7 @@ int vstrm_h264_sei_streaming_v2_write(
 	ssize_t res = vstrm_h264_sei_streaming_v2_get_size(sei);
 	if (res < 0) {
 		ULOG_ERRNO("vstrm_h264_sei_streaming_v2_get_size", (int)-res);
-		return res;
+		return (int)res;
 	}
 	size_t sz = res;
 
@@ -237,8 +240,11 @@ int vstrm_h264_sei_streaming_v2_read(struct vstrm_h264_sei_streaming_v2 *sei,
 
 	if (len < 4)
 		return -EIO;
-	sei->slice_count = (buf[0] << 8) | buf[1];
-	sei->slice_mb_count = (buf[2] << 8) | buf[3];
+
+	sei->slice_count =
+		(uint16_t)(((uint32_t)buf[0] << 8) | (uint32_t)buf[1]);
+	sei->slice_mb_count =
+		(uint16_t)(((uint32_t)buf[2] << 8) | (uint32_t)buf[3]);
 
 	return 0;
 }
@@ -278,7 +284,7 @@ int vstrm_h264_sei_streaming_v4_write(
 	ssize_t res = vstrm_h264_sei_streaming_v4_get_size(sei);
 	if (res < 0) {
 		ULOG_ERRNO("vstrm_h264_sei_streaming_v4_get_size", (int)-res);
-		return res;
+		return (int)res;
 	}
 	size_t sz = res;
 
@@ -315,8 +321,10 @@ int vstrm_h264_sei_streaming_v4_read(struct vstrm_h264_sei_streaming_v4 *sei,
 
 	if (len < 4)
 		return -EIO;
-	sei->slice_mb_count = (buf[0] << 8) | buf[1];
-	sei->slice_mb_count_recovery_point = (buf[2] << 8) | buf[3];
+	sei->slice_mb_count =
+		(uint16_t)(((uint32_t)buf[0] << 8) | (uint32_t)buf[1]);
+	sei->slice_mb_count_recovery_point =
+		(uint16_t)(((uint32_t)buf[2] << 8) | (uint32_t)buf[3]);
 
 	return 0;
 }

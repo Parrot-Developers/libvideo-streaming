@@ -201,8 +201,8 @@ int vstrm_clock_delta_process(struct vstrm_clock_delta_ctx *ctx,
 			/* Initialization phase: alpha is 100% minus
 			 * the filling percentage of the window */
 			uint32_t perc_time =
-				(receive_ts - ctx->window_start_ts) * 100 /
-				CLOCK_DELTA_WINDOW_TIMEOUT;
+				(uint32_t)((receive_ts - ctx->window_start_ts) *
+					   100 / CLOCK_DELTA_WINDOW_TIMEOUT);
 			uint32_t perc_window =
 				ctx->window_pos * 100 / CLOCK_DELTA_WINDOW_SIZE;
 			uint32_t perc = perc_time > perc_window ? perc_time

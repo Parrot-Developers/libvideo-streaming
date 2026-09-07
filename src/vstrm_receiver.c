@@ -152,7 +152,8 @@ vstrm_receiver_rtcp_sender_report_cb(const struct rtcp_pkt_sender_report *sr,
 	self->source.tsAden = tsAden;
 
 	/* TODO: handle 32-bit wrap around? */
-	self->source.lastSrInterval = ntp_timestamp - last_ntp_timestamp;
+	self->source.lastSrInterval =
+		(uint32_t)(ntp_timestamp - last_ntp_timestamp);
 	self->source.srIntervalPacketCount =
 		sr->sender_packet_count -
 		self->source.last_sr.sender_packet_count;
@@ -323,7 +324,7 @@ vstrm_receiver_write_rtcp_receiver_report(struct vstrm_receiver *self,
 
 	rtp_jitter_get_info(
 		self->source.rtp_jitter, &clk_rate, &jitter_avg, NULL);
-	jitter_avg = rtp_timestamp_from_us(jitter_avg, clk_rate);
+	jitter_avg = (uint32_t)rtp_timestamp_from_us(jitter_avg, clk_rate);
 
 	memset(&rr, 0, sizeof(rr));
 	rr.ssrc = self->ssrc;
@@ -339,10 +340,10 @@ vstrm_receiver_write_rtcp_receiver_report(struct vstrm_receiver *self,
 			&self->source.last_sr.ntp_timestamp,
 			&rr.reports[0].lsr);
 
-		rr.reports[0].dlsr =
+		rr.reports[0].dlsr = (uint32_t)(
 			((cur_timestamp - self->source.last_sr_timestamp)
 			 << 16) /
-			1000000;
+			1000000);
 	}
 
 	/* Write in packet */
@@ -390,7 +391,7 @@ static int vstrm_receiver_write_rtcp_sdes(const struct vstrm_receiver *self,
 		chunk.items = &item;
 		item.type = RTCP_PKT_SDES_TYPE_CNAME;
 		item.data = (const uint8_t *)serial;
-		item.data_len = strnlen(serial, max_len);
+		item.data_len = (uint8_t)strnlen(serial, max_len);
 		res = rtcp_pkt_write_sdes(buf, pos, &sdes);
 	}
 
@@ -436,7 +437,7 @@ static int vstrm_receiver_write_rtcp_clock_delta(struct vstrm_receiver *self,
 	app.name = VSTRM_RTCP_APP_PACKET_NAME;
 	app.subtype = VSTRM_RTCP_APP_PACKET_SUBTYPE_CLOCK_DELTA;
 	app.data = cdata;
-	app.data_len = len;
+	app.data_len = (uint32_t)len;
 
 	/* Write in packet */
 	res = rtcp_pkt_write_app(buf, pos, &app);
@@ -507,7 +508,7 @@ static int vstrm_receiver_write_rtcp_video_stats(struct vstrm_receiver *self,
 	app.name = VSTRM_RTCP_APP_PACKET_NAME;
 	app.subtype = VSTRM_RTCP_APP_PACKET_SUBTYPE_VIDEO_STATS;
 	app.data = cdata;
-	app.data_len = len;
+	app.data_len = (uint32_t)len;
 
 	/* Write in packet */
 	res = rtcp_pkt_write_app(buf, pos, &app);
@@ -958,7 +959,7 @@ int vstrm_receiver_new(const struct vstrm_receiver_cfg *cfg,
 	if (env_dbg_dir != NULL)
 		self->cfg.dbg_dir = env_dbg_dir;
 	if (env_dbg_flags != NULL)
-		self->cfg.dbg_flags = strtol(env_dbg_flags, NULL, 0);
+		self->cfg.dbg_flags = (uint32_t)strtol(env_dbg_flags, NULL, 0);
 
 	/* Copy debug directory string and update config pointer */
 	if (self->cfg.dbg_dir != NULL) {
@@ -1180,7 +1181,7 @@ int vstrm_receiver_set_codec_info(struct vstrm_receiver *self,
 }
 
 
-uint64_t vstrm_receiver_get_ntp_from_rtp_ts(struct vstrm_receiver *self,
+uint64_t vstrm_receiver_get_ntp_from_rtp_ts(const struct vstrm_receiver *self,
 					    uint32_t rtpts)
 {
 	uint32_t clk_rate = 0;
